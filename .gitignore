@@ -46,3 +46,6 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Binário do Impeccable baixado pelo launcher, específico do sistema
+.cursor/skills/impeccable/scripts/bin/
