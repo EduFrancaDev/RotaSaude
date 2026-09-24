@@ -1,0 +1,4 @@
+interface:
+  display_name: "RotaSaúde Mobile"
+  short_description: "Organize e implemente o app Flutter com DRY"
+  default_prompt: "Use $rotasaude-mobile para implementar ou organizar esta parte do aplicativo Flutter RotaSaúde com mudanças pequenas e validação relevante."
