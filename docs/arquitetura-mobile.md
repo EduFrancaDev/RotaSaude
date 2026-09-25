@@ -13,8 +13,20 @@ lib/
 ├── main.dart                 entrada do processo e runApp
 ├── app.dart                  MaterialApp e configuração principal
 ├── screens/
-│   ├── home_screen.dart      apresentação inicial e símbolo pulsante
-│   └── location_screen.dart  escolha manual de cidade
+│   ├── home_screen.dart      primeira entrada e estados da localização
+│   ├── location_required_screen.dart  bloqueio se a localização for desligada
+│   ├── map_screen.dart       exploração em mapa, lista e comparação
+│   ├── location_selection_screen.dart  escolha de área de consulta
+│   ├── unit_details_screen.dart  detalhes e dados indisponíveis da unidade
+│   ├── route_preview_screen.dart  prévias ilustrativas por transporte
+│   └── availability_screen.dart  explicação dos indicadores
+├── models/
+│   └── demo_health_unit.dart  áreas, unidades e dados locais ilustrativos
+├── services/
+│   ├── location_access.dart  acesso à localização do dispositivo
+│   └── location_onboarding_store.dart  lembra a primeira aceitação
+├── widgets/
+│   └── unit_ui.dart          indicadores, métricas e aviso ilustrativo
 └── theme/
     ├── app_colors.dart       cores da marca
     └── app_theme.dart        tema Material 3
@@ -22,19 +34,22 @@ lib/
 
 `main.dart` equivale ao ponto de entrada da aplicação. `RotaSaudeApp` é o widget raiz, semelhante ao componente raiz de um app React Native. `HomeScreen` é uma tela composta por widgets Flutter. O `ThemeData` centraliza cores e estilos compartilhados, em vez de espalhar valores por todas as telas.
 
-A tela inicial segue o esboço de apresentação: símbolo circular, mensagem e botão **Começar**. O halo pulsa com `AnimationController` do Flutter e fica estático quando o sistema solicita redução de movimento. A composição usa `SafeArea` e rolagem para caber em telas menores e com fonte ampliada. O botão abre `LocationScreen`, onde a cidade pode ser informada manualmente. Essa escolha fica apenas na memória da tela; a consulta às unidades ainda não foi integrada, e a interface informa essa limitação sem inventar dados de saúde. Não há serviço, repositório ou pacote adicional para esse fluxo.
+A tela inicial aparece só na primeira entrada e pede a localização após o toque no botão. Quando a pessoa aceita e o mapa abre, essa escolha fica gravada com `shared_preferences`. Nas próximas aberturas o app vai direto ao mapa. Se a permissão for desligada ou o serviço de localização estiver desativado, `LocationRequiredScreen` cobre qualquer tela até o acesso voltar. `HomeScreen` verifica permissão e serviço separadamente, trata negação, bloqueio, serviço desligado e falha de posição e reavalia os estados ao voltar dos ajustes. `LocationAccess` isola o plugin `geolocator` para testar o fluxo sem depender do aparelho. A permissão solicitada é apenas de uso em primeiro plano. A entrada no mapa usa uma revelação circular a partir do botão, omitida quando o sistema pede redução de movimento.
+
+`MapScreen` mantém a área consultada, unidade selecionada, busca, filtro, ordenação, meio de transporte e as abas Mapa/Lista/Comparar. O mapa usa `flutter_map` e blocos do OpenStreetMap, com atribuição visível; a lista e os dados locais continuam acessíveis se os blocos falharem. `DemoHealthUnits` contém dados determinísticos para Goiânia e mantém Aparecida de Goiânia como sugestão sem resultados. Os nomes, endereços, espera, disponibilidade, distâncias e deslocamentos com “Exemplo” são demonstrativos, com aviso visível. A escolha manual muda apenas a área consultada e não substitui a permissão obrigatória do aparelho.
+
+Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. As telas de rota desenham um esquema local marcado como ilustrativo; não calculam trajeto, trânsito ou transporte em tempo real.
 
 ## Identidade visual
 
-As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../assets/brand/README.md) estão preservados como arquivos vetoriais. A base não adiciona um package apenas para renderizar SVG na tela inicial.
+As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../assets/brand/README.md) estão preservados como arquivos vetoriais. A tela inicial desenha a logo com `flutter_svg`, porque o Flutter não renderiza SVG sozinho.
 
 ## Evolução prevista
 
-1. Criar telas e widgets conforme os fluxos forem definidos, começando por localização manual e listagem de unidades.
-2. Adicionar modelos Dart quando existir um formato de dados acordado para unidade, disponibilidade e serviços.
-3. Adicionar serviços e repositórios somente quando houver uma fonte de dados real ou demonstrativa que precise ser isolada da interface.
-4. Usar `StatefulWidget` e `setState` para estado local simples. Avaliar outra solução apenas quando o fluxo mostrar uma necessidade concreta.
-5. Adicionar packages de localização, mapas, HTTP ou rotas quando a respectiva funcionalidade entrar em implementação.
+1. Substituir as fixtures por uma fonte de dados definida quando integração real for solicitada e acordada.
+2. Manter serviços/repositórios fora dos widgets se a fonte de dados passar a ser assíncrona.
+3. Usar `StatefulWidget` e `setState` para estado local simples. Avaliar outra solução apenas quando o fluxo mostrar uma necessidade concreta.
+4. Implementar roteamento real somente quando houver provedor e contrato definidos; as telas atuais são demonstrações locais.
 
 ## Desenvolvimento no celular
 
