@@ -29,4 +29,4 @@ dart format --output=none --set-exit-if-changed lib
 flutter analyze
 ```
 
-A tela inicial apresenta a proposta do produto com um símbolo pulsante. **Começar** abre a escolha manual de cidade, mantida somente durante a sessão dessa tela. A consulta de unidades, disponibilidade e rotas será implementada por etapas, quando houver dados e integrações definidos.
+A tela inicial pede localização somente após o toque em **Usar minha localização**. Com a permissão e o serviço do aparelho disponíveis, o app abre a exploração de unidades em mapa, lista e comparação. A escolha manual altera a área consultada sem substituir a permissão obrigatória do aparelho. Goiânia e Aparecida de Goiânia são áreas demonstrativas: somente Goiânia tem unidades no catálogo local. Nomes com “Exemplo”, disponibilidade, esperas, distâncias e rotas são dados ilustrativos do protótipo, não informações atuais nem navegação em tempo real.
