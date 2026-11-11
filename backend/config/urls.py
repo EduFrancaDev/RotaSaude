@@ -8,6 +8,7 @@ api_v1 = [
     path("", include("apps.units.urls")),
     path("", include("apps.services.urls")),
     path("", include("apps.integrations.urls")),
+    path("", include("apps.routing.urls")),
 ]
 
 urlpatterns = [

@@ -67,6 +67,7 @@ Os endpoints públicos (`health`, `units`, `services`) são somente leitura: `PO
 | GET | `/api/v1/units/{id}/` | Detalhe. `{id}` é o `external_id` público (ex.: `upa-centro`). |
 | GET | `/api/v1/services/` | Lista paginada de serviços. |
 | POST | `/api/v1/integrations/operational-status/` | Leitura operacional enviada por um estabelecimento (chave Bearer; veja abaixo). |
+| GET | `/api/v1/routes/` | Rota de carro até uma unidade (`driving`; provedor configurável; veja [Rotas](#rotas-de-carro-osrm)). |
 
 ### Paginação
 
@@ -209,6 +210,59 @@ Exemplo de resposta do passo 2 (`201`):
 }
 ```
 
+## Rotas de carro (OSRM)
+
+Roteamento real de **carro** via provedor configurável (`ROUTING_PROVIDER`, hoje `osrm`). A arquitetura usa `RoutingProvider` + `OSRMRoutingProvider`, preparada para um futuro `GoogleRoutesProvider` sem mudar o contrato HTTP.
+
+### Configuração
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `ROUTING_PROVIDER` | `osrm` | Provedor ativo. |
+| `OSRM_BASE_URL` | `https://router.project-osrm.org` | Base do serviço Route do OSRM. |
+| `OSRM_TIMEOUT_SECONDS` | `10` | Timeout da chamada externa. |
+| `ROUTING_CACHE_TTL` | `120` | Cache da resposta normalizada (segundos). Chave é hash; coordenadas não vão para log. |
+| `ROUTING_RATE_LIMIT` | `30/min` | Limite por IP na API `/routes/`. |
+| `OSRM_MIN_REQUEST_INTERVAL` | `1.0` | Intervalo mínimo entre **chamadas outbound** ao OSRM (cache compartilhado). |
+| `OSRM_OUTBOUND_LOCK_TTL` | `30` | Trava para evitar consultas simultâneas ao servidor público. |
+
+### Contrato HTTP
+
+`GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`
+
+- Destino: coordenadas da unidade ativa no PostgreSQL (`external_id` = `unit_id`).
+- `mode`: apenas `driving`. `bus`, `transit` e similares → `400` com mensagem explícita de transporte público indisponível.
+- Erros: `400` validação, `404` unidade, `429` limite da API, `502` rota rejeitada pelo provedor, `503` provedor ocupado/indisponível/timeout. Detalhes internos não são expostos.
+- Logs: apenas `unit_id` e `mode`; **não** registram coordenadas de origem.
+
+Resposta (`200`):
+
+```json
+{
+  "provider": "osrm",
+  "mode": "driving",
+  "unit_id": "upa-centro",
+  "distance_meters": 582.4,
+  "duration_seconds": 95.2,
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [[-49.2648, -16.6869], [-49.264, -16.6862]]
+  }
+}
+```
+
+`geometry.coordinates` segue GeoJSON: **`[longitude, latitude]`**.
+
+### Limitações do OSRM público
+
+O host `router.project-osrm.org` é **demonstração**: sem SLA, pode limitar taxa ou bloquear uso intensivo. Não use em produção. O backend mitiga com cache curto, throttle por IP, uma chamada outbound por vez e intervalo mínimo entre consultas ao OSRM — ainda assim convém instância OSRM própria ou Google Routes em produção.
+
+Exemplo (Goiânia, após `seed_demo_units`):
+
+```bash
+curl -s "http://127.0.0.1:8000/api/v1/routes/?origin_lat=-16.6869&origin_lon=-49.2648&unit_id=upa-centro&mode=driving"
+```
+
 ## Estrutura
 
 ```text
@@ -219,6 +273,7 @@ backend/
 │                      API de unidades e comando seed_demo_units
 ├── apps/integrations/ IntegrationCredential, autenticação por chave, throttle,
 │                      endpoint de ingestão e comando create_integration_credential
+├── apps/routing/      RoutingProvider, OSRM, GET /routes/
 ├── compose.yaml · Dockerfile · requirements.txt · .env.example
 ```
 
@@ -233,6 +288,6 @@ Cada leitura é um registro novo em `UnitOperationalStatus`. No Admin, leituras 
 ## Limitações conhecidas
 
 - Imagem e Compose são de desenvolvimento: falta servidor WSGI/ASGI, arquivos estáticos do Admin e endurecimento de produção (`check --deploy`).
-- Endpoints públicos sem autenticação nem limite de requisições; o limite existe apenas na integração (veja as limitações acima).
+- Endpoints públicos de unidades/serviços sem autenticação; `/routes/` tem throttle por IP e depende de provedor externo (veja [Rotas](#rotas-de-carro-osrm)).
 - A migração `units.0002` (unicidade da leitura) falha se já existirem duas leituras da mesma unidade no mesmo `source_updated_at`; não há tal caso nos dados do seed.
 - Coordenadas em `FloatField`; PostGIS (busca por proximidade) fica para quando for necessário.

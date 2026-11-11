@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.services",
     "apps.units",
     "apps.integrations",
+    "apps.routing",
 ]
 
 MIDDLEWARE = [
@@ -116,6 +117,20 @@ REST_FRAMEWORK = {
 
 # Limite de requisições por credencial de integração (formato do DRF: N/sec|min|hour|day).
 INTEGRATION_RATE_LIMIT = os.environ.get("INTEGRATION_RATE_LIMIT", "60/min")
+
+# --- Roteamento (OSRM demo; futuro Google Routes) ---
+ROUTING_PROVIDER = os.environ.get("ROUTING_PROVIDER", "osrm")
+OSRM_BASE_URL = os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org")
+OSRM_TIMEOUT_SECONDS = float(os.environ.get("OSRM_TIMEOUT_SECONDS", "10"))
+ROUTING_CACHE_TTL = int(os.environ.get("ROUTING_CACHE_TTL", "120"))
+ROUTING_RATE_LIMIT = os.environ.get("ROUTING_RATE_LIMIT", "30/min")
+OSRM_MIN_REQUEST_INTERVAL = float(os.environ.get("OSRM_MIN_REQUEST_INTERVAL", "1.0"))
+OSRM_OUTBOUND_LOCK_TTL = int(os.environ.get("OSRM_OUTBOUND_LOCK_TTL", "30"))
+
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+    "integration": INTEGRATION_RATE_LIMIT,
+    "routes": ROUTING_RATE_LIMIT,
+}
 
 # --- CORS: somente origens explícitas, somente leitura ---
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
