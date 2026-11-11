@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
 
@@ -10,12 +10,12 @@ class UnitDetailsScreen extends StatelessWidget {
     super.key,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final ValueChanged<TravelMode>? onRoute;
 
   @override
   Widget build(BuildContext context) {
-    final operational = unit.operationalData;
+    final operational = unit.currentOperationalData;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -46,11 +46,13 @@ class UnitDetailsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             if (operational == null)
-              const _UnavailableDataCard()
+              _UnavailableDataCard(unit: unit)
             else ...[
-              AvailabilityPill(level: operational.availability),
-              const SizedBox(height: 8),
-              const IllustrativeNotice(compact: true),
+              UnitAvailabilityStatus(unit: unit),
+              if (unit.isDemo) ...[
+                const SizedBox(height: 8),
+                const IllustrativeNotice(compact: true),
+              ],
               const SizedBox(height: 14),
               Card.outlined(
                 color: Colors.white,
@@ -81,7 +83,13 @@ class UnitDetailsScreen extends StatelessWidget {
                       ),
                       const Divider(height: 24),
                       Text(
-                        'A espera é estimada e pode mudar. Os valores desta tela são ilustrativos.',
+                        [
+                          'A espera é estimada e pode mudar.',
+                          if (unit.isDemo)
+                            'Os valores desta tela são ilustrativos.'
+                          else if (operational.updatedAt case final updatedAt?)
+                            'Atualizado em ${formatUpdateTime(updatedAt)}.',
+                        ].join(' '),
                         style: textTheme.bodySmall?.copyWith(
                           color: AppColors.muted,
                           height: 1.35,
@@ -121,7 +129,7 @@ class UnitDetailsScreen extends StatelessWidget {
                 ),
               ),
             ],
-            if (operational != null) ...[
+            if (unit.openingHours != null || unit.phone != null) ...[
               const SizedBox(height: 18),
               Card.outlined(
                 color: Colors.white,
@@ -169,7 +177,9 @@ class UnitDetailsScreen extends StatelessWidget {
 }
 
 class _UnavailableDataCard extends StatelessWidget {
-  const _UnavailableDataCard();
+  const _UnavailableDataCard({required this.unit});
+
+  final HealthUnit unit;
 
   @override
   Widget build(BuildContext context) {
@@ -198,8 +208,18 @@ class _UnavailableDataCard extends StatelessWidget {
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: AppColors.muted, height: 1.4),
             ),
-            const SizedBox(height: 12),
-            const IllustrativeNotice(compact: true),
+            if (unit.operationalData?.updatedAt case final updatedAt?) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Última atualização recebida: ${formatUpdateTime(updatedAt)}.',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.muted),
+              ),
+            ],
+            if (unit.isDemo) ...[
+              const SizedBox(height: 12),
+              const IllustrativeNotice(compact: true),
+            ],
           ],
         ),
       ),

@@ -1,9 +1,45 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 
 String formatDistanceKilometers(double distanceKm) =>
     '${distanceKm.toStringAsFixed(1).replaceFirst('.', ',')} km';
+
+String formatUpdateTime(DateTime instant) {
+  final local = instant.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.day)}/${two(local.month)} às '
+      '${two(local.hour)}:${two(local.minute)}';
+}
+
+extension HealthUnitStatusText on HealthUnit {
+  /// Nível exibível: só existe quando a leitura é atual e traz o nível.
+  AvailabilityLevel? get currentAvailability =>
+      currentOperationalData?.availability;
+
+  /// Texto curto do estado operacional, para marcadores e rótulos
+  /// acessíveis. Nunca apresenta dado antigo como atual.
+  String get operationalSummary => switch (operationalState()) {
+    OperationalDataState.current =>
+      currentAvailability?.label ?? 'Disponibilidade não informada',
+    OperationalDataState.stale => 'Dados desatualizados',
+    OperationalDataState.missing => 'Dados operacionais indisponíveis',
+  };
+}
+
+/// Indicador de disponibilidade da unidade, ou o motivo de não haver um.
+class UnitAvailabilityStatus extends StatelessWidget {
+  const UnitAvailabilityStatus({required this.unit, super.key});
+
+  final HealthUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final level = unit.currentAvailability;
+    if (level != null) return AvailabilityPill(level: level);
+    return Text(unit.operationalSummary);
+  }
+}
 
 class AvailabilityPill extends StatelessWidget {
   const AvailabilityPill({required this.level, super.key});
@@ -46,6 +82,8 @@ class AvailabilityPill extends StatelessWidget {
   }
 }
 
+/// Aviso de dado demonstrativo. Só deve ser exibido para unidades ou leituras
+/// marcadas com `is_demo` (ou para conteúdo sempre ilustrativo, como rotas).
 class IllustrativeNotice extends StatelessWidget {
   const IllustrativeNotice({
     super.key,

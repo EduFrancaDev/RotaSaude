@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/screens/availability_screen.dart';
 import 'package:rotasaude/screens/location_selection_screen.dart';
 import 'package:rotasaude/screens/route_preview_screen.dart';
@@ -13,10 +14,15 @@ import 'package:rotasaude/widgets/unit_ui.dart';
 
 enum _DiscoveryTab { map, list, compare }
 
+enum _LoadStatus { loading, loaded, failed }
+
 class MapScreen extends StatefulWidget {
-  const MapScreen({required this.position, super.key});
+  const MapScreen({required this.position, this.repository, super.key});
 
   final Position position;
+
+  /// Fonte das unidades. Sem ela, usa a API configurada em [ApiConfig].
+  final HealthUnitRepository? repository;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -24,24 +30,76 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   late SearchArea? _area = SearchArea.fromPosition(widget.position);
+  late final HealthUnitRepository _repository =
+      widget.repository ?? ApiHealthUnitRepository();
+  List<HealthUnit> _units = const [];
+  late _LoadStatus _loadStatus = _area?.city == null
+      ? _LoadStatus.loaded
+      : _LoadStatus.loading;
+  HealthApiException? _failure;
+  int _loadGeneration = 0;
   _DiscoveryTab _tab = _DiscoveryTab.map;
   TravelMode _travelMode = TravelMode.car;
   String _query = '';
   String? _serviceFilter;
   String _sortOrder = 'Destaque';
   bool _searchExpanded = false;
-  String? _selectedUnitId = 'upa-centro';
+  String? _selectedUnitId;
   final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnits();
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    if (widget.repository == null) _repository.close();
     super.dispose();
   }
 
-  List<DemoHealthUnit> get _visibleUnits {
+  /// Consulta as unidades da área atual. O chamador marca o estado de
+  /// carregamento antes; respostas de consultas substituídas são ignoradas.
+  Future<void> _loadUnits() async {
+    final generation = ++_loadGeneration;
+    final city = _area?.city;
+    if (city == null) return;
+    HealthApiException? failure;
+    List<HealthUnit> units = const [];
+    try {
+      units = await _repository.fetchUnits(city: city);
+    } on HealthApiException catch (error) {
+      failure = error;
+    } on Exception catch (error) {
+      failure = HealthApiException(
+        HealthApiFailureKind.invalidResponse,
+        'Falha inesperada: $error',
+      );
+    }
+    if (!mounted || generation != _loadGeneration) return;
+    setState(() {
+      _failure = failure;
+      _units = units;
+      _loadStatus = failure == null ? _LoadStatus.loaded : _LoadStatus.failed;
+      if (!units.any((unit) => unit.id == _selectedUnitId)) {
+        _selectedUnitId = units.firstOrNull?.id;
+      }
+    });
+  }
+
+  void _retryLoad() {
+    setState(() {
+      _loadStatus = _LoadStatus.loading;
+      _failure = null;
+    });
+    _loadUnits();
+  }
+
+  List<HealthUnit> get _visibleUnits {
     final query = _query.trim().toLowerCase();
-    final units = DemoHealthUnits.forArea(_area).where((unit) {
+    final units = _units.where((unit) {
       final matchesQuery =
           query.isEmpty ||
           unit.name.toLowerCase().contains(query) ||
@@ -52,8 +110,8 @@ class _MapScreenState extends State<MapScreen> {
     }).toList();
     if (_sortOrder == 'Menor espera') {
       units.sort((a, b) {
-        final aWait = a.operationalData?.waitMinutes;
-        final bWait = b.operationalData?.waitMinutes;
+        final aWait = a.currentOperationalData?.waitMinutes;
+        final bWait = b.currentOperationalData?.waitMinutes;
         if (aWait == null && bWait == null) return a.name.compareTo(b.name);
         if (aWait == null) return 1;
         if (bWait == null) return -1;
@@ -63,18 +121,14 @@ class _MapScreenState extends State<MapScreen> {
     return units;
   }
 
-  DemoHealthUnit? get _selectedUnit {
+  HealthUnit? get _selectedUnit {
     final selectedId = _selectedUnitId;
     if (selectedId == null) return null;
     return _visibleUnits.where((unit) => unit.id == selectedId).firstOrNull;
   }
 
   List<String> get _services =>
-      DemoHealthUnits.forArea(_area)
-          .expand((unit) => unit.services)
-          .toSet()
-          .toList()
-        ..sort();
+      _units.expand((unit) => unit.services).toSet().toList()..sort();
 
   Future<void> _chooseArea() async {
     final area = await Navigator.of(context).push<SearchArea>(
@@ -85,19 +139,25 @@ class _MapScreenState extends State<MapScreen> {
     if (!mounted || area == null) return;
     setState(() {
       _area = area;
-      _selectedUnitId = DemoHealthUnits.forArea(area).firstOrNull?.id;
+      _units = const [];
+      _failure = null;
+      _loadStatus = area.city == null
+          ? _LoadStatus.loaded
+          : _LoadStatus.loading;
+      _selectedUnitId = null;
       _query = '';
       _serviceFilter = null;
       _searchController.clear();
     });
+    _loadUnits();
   }
 
-  Future<void> _showDetails(DemoHealthUnit unit) async {
+  Future<void> _showDetails(HealthUnit unit) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => UnitDetailsScreen(
           unit: unit,
-          onRoute: unit.operationalData == null
+          onRoute: unit.currentOperationalData == null
               ? null
               : (mode) => _showRoute(unit, mode),
         ),
@@ -105,8 +165,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Future<void> _showRoute(DemoHealthUnit unit, TravelMode mode) async {
-    // Deferred import-free route screen navigation is defined in its own file.
+  Future<void> _showRoute(HealthUnit unit, TravelMode mode) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => RoutePreviewScreen(unit: unit, initialMode: mode),
@@ -223,7 +282,19 @@ class _MapScreenState extends State<MapScreen> {
     _DiscoveryTab.compare => _buildComparison(),
   };
 
+  /// Carregamento ou falha da consulta; `null` quando há resultado a mostrar.
+  Widget? _buildLoadState() => switch (_loadStatus) {
+    _LoadStatus.loading => const _LoadingUnits(),
+    _LoadStatus.failed => _LoadFailure(
+      kind: _failure?.kind ?? HealthApiFailureKind.connection,
+      onRetry: _retryLoad,
+    ),
+    _LoadStatus.loaded => null,
+  };
+
   Widget _buildMap() {
+    final loadState = _buildLoadState();
+    if (loadState != null) return loadState;
     final units = _visibleUnits;
     final center =
         _area?.center ??
@@ -277,8 +348,7 @@ class _MapScreenState extends State<MapScreen> {
                     child: Semantics(
                       excludeSemantics: true,
                       button: true,
-                      label:
-                          '${unit.name}, ${unit.operationalData?.availability.label ?? 'Dados operacionais indisponíveis'}',
+                      label: '${unit.name}, ${unit.operationalSummary}',
                       selected: _selectedUnitId == unit.id,
                       onTap: () => setState(() => _selectedUnitId = unit.id),
                       child: GestureDetector(
@@ -293,10 +363,7 @@ class _MapScreenState extends State<MapScreen> {
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color:
-                                      unit
-                                          .operationalData
-                                          ?.availability
-                                          .color ??
+                                      unit.currentAvailability?.color ??
                                       AppColors.muted,
                                   width: 3,
                                 ),
@@ -307,10 +374,7 @@ class _MapScreenState extends State<MapScreen> {
                                 child: Icon(
                                   Icons.local_hospital_outlined,
                                   color:
-                                      unit
-                                          .operationalData
-                                          ?.availability
-                                          .color ??
+                                      unit.currentAvailability?.color ??
                                       AppColors.muted,
                                   size: 24,
                                 ),
@@ -376,12 +440,24 @@ class _MapScreenState extends State<MapScreen> {
             child: _EmptyResults(
               title: _area == null
                   ? 'Escolha uma cidade para consultar unidades'
-                  : 'Nenhuma unidade nesta área do protótipo',
+                  : _units.isEmpty
+                  ? 'Nenhuma unidade cadastrada nesta área'
+                  : 'Nenhuma unidade encontrada',
               message: _area == null
-                  ? 'Os dados demonstrativos disponíveis são de Goiânia.'
-                  : 'Você pode alterar a cidade a qualquer momento.',
-              actionLabel: 'Escolher localização',
-              onAction: _chooseArea,
+                  ? 'Sua localização está fora das áreas com unidades cadastradas.'
+                  : _units.isEmpty
+                  ? 'Você pode alterar a cidade a qualquer momento.'
+                  : 'Tente outra busca ou limpe os filtros aplicados.',
+              actionLabel: _units.isEmpty || _area == null
+                  ? 'Escolher localização'
+                  : 'Limpar filtros',
+              onAction: _units.isEmpty || _area == null
+                  ? _chooseArea
+                  : () => setState(() {
+                      _query = '';
+                      _searchController.clear();
+                      _serviceFilter = null;
+                    }),
             ),
           )
         else if (_selectedUnit != null)
@@ -397,7 +473,45 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Widget _buildList() {
+    final loadState = _buildLoadState();
     final units = _visibleUnits;
+    final Widget body;
+    if (loadState != null) {
+      body = loadState;
+    } else if (_units.isEmpty) {
+      body = _EmptyResults(
+        title: 'Nenhuma unidade cadastrada nesta área',
+        message: 'Você pode alterar a cidade a qualquer momento.',
+        actionLabel: 'Escolher localização',
+        onAction: _chooseArea,
+      );
+    } else if (units.isEmpty) {
+      body = _EmptyResults(
+        title: 'Nenhuma unidade encontrada',
+        message: 'Tente outra busca ou limpe os filtros aplicados.',
+        actionLabel: 'Limpar filtros',
+        onAction: () => setState(() {
+          _query = '';
+          _searchController.clear();
+          _serviceFilter = null;
+        }),
+      );
+    } else {
+      body = ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+        itemCount: units.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final unit = units[index];
+          return _UnitListCard(
+            unit: unit,
+            selected: _selectedUnitId == unit.id,
+            onSelect: () => setState(() => _selectedUnitId = unit.id),
+            onDetails: () => _showDetails(unit),
+          );
+        },
+      );
+    }
     return Column(
       children: [
         Padding(
@@ -433,13 +547,17 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                 ],
               ),
-              Text(
-                '${units.length} ${units.length == 1 ? 'unidade' : 'unidades'} · ${_area?.name ?? 'Área não definida'}',
-                style: Theme.of(context).textTheme.bodySmall
-                    ?.copyWith(color: AppColors.muted),
-              ),
-              const SizedBox(height: 6),
-              const IllustrativeNotice(compact: true, short: true),
+              if (loadState == null) ...[
+                Text(
+                  '${units.length} ${units.length == 1 ? 'unidade' : 'unidades'} · ${_area?.name ?? 'Área não definida'}',
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: AppColors.muted),
+                ),
+                if (units.any((unit) => unit.isDemo)) ...[
+                  const SizedBox(height: 6),
+                  const IllustrativeNotice(compact: true, short: true),
+                ],
+              ],
             ],
           ),
         ),
@@ -469,39 +587,39 @@ class _MapScreenState extends State<MapScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: units.isEmpty
-              ? _EmptyResults(
-                  title: 'Nenhuma unidade encontrada',
-                  message: 'Tente outra busca ou limpe os filtros aplicados.',
-                  actionLabel: 'Limpar filtros',
-                  onAction: () => setState(() {
-                    _query = '';
-                    _searchController.clear();
-                    _serviceFilter = null;
-                  }),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
-                  itemCount: units.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final unit = units[index];
-                    return _UnitListCard(
-                      unit: unit,
-                      selected: _selectedUnitId == unit.id,
-                      onSelect: () => setState(() => _selectedUnitId = unit.id),
-                      onDetails: () => _showDetails(unit),
-                    );
-                  },
-                ),
-        ),
+        Expanded(child: body),
       ],
     );
   }
 
   Widget _buildComparison() {
+    final loadState = _buildLoadState();
     final units = _visibleUnits;
+    final Widget body;
+    if (loadState != null) {
+      body = loadState;
+    } else if (units.isEmpty) {
+      body = const _EmptyResults(
+        title: 'Nenhuma unidade para comparar',
+        message: 'Altere a cidade ou os filtros da lista.',
+      );
+    } else {
+      body = ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+        itemCount: units.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final unit = units[index];
+          return _ComparisonCard(
+            unit: unit,
+            mode: _travelMode,
+            selected: _selectedUnitId == unit.id,
+            onSelect: () => setState(() => _selectedUnitId = unit.id),
+            onDetails: () => _showDetails(unit),
+          );
+        },
+      );
+    }
     return Column(
       children: [
         Padding(
@@ -542,8 +660,10 @@ class _MapScreenState extends State<MapScreen> {
                 style: Theme.of(context).textTheme.bodyMedium
                     ?.copyWith(color: AppColors.muted),
               ),
-              const SizedBox(height: 4),
-              const IllustrativeNotice(compact: true, short: true),
+              if (units.any((unit) => unit.isDemo)) ...[
+                const SizedBox(height: 4),
+                const IllustrativeNotice(compact: true, short: true),
+              ],
               const SizedBox(height: 4),
               SegmentedButton<TravelMode>(
                 style: AppTheme.primarySegmentedButtonStyle,
@@ -558,28 +678,7 @@ class _MapScreenState extends State<MapScreen> {
             ],
           ),
         ),
-        Expanded(
-          child: units.isEmpty
-              ? _EmptyResults(
-                  title: 'Nenhuma unidade para comparar',
-                  message: 'Altere a cidade ou os filtros da lista.',
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-                  itemCount: units.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final unit = units[index];
-                    return _ComparisonCard(
-                      unit: unit,
-                      mode: _travelMode,
-                      selected: _selectedUnitId == unit.id,
-                      onSelect: () => setState(() => _selectedUnitId = unit.id),
-                      onDetails: () => _showDetails(unit),
-                    );
-                  },
-                ),
-        ),
+        Expanded(child: body),
       ],
     );
   }
@@ -641,12 +740,12 @@ class _DiscoveryHeader extends StatelessWidget {
 class _MapUnitSummary extends StatelessWidget {
   const _MapUnitSummary({required this.unit, required this.onDetails});
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final VoidCallback onDetails;
 
   @override
   Widget build(BuildContext context) {
-    final operational = unit.operationalData;
+    final operational = unit.currentOperationalData;
     return Card(
       margin: const EdgeInsets.fromLTRB(10, 10, 10, 10),
       color: Colors.white,
@@ -666,10 +765,7 @@ class _MapUnitSummary extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            if (operational != null)
-              AvailabilityPill(level: operational.availability)
-            else
-              const Text('Dados operacionais indisponíveis'),
+            UnitAvailabilityStatus(unit: unit),
             if (operational != null) ...[
               const SizedBox(height: 8),
               Row(
@@ -691,8 +787,10 @@ class _MapUnitSummary extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: 8),
-            const IllustrativeNotice(compact: true),
+            if (unit.isDemo) ...[
+              const SizedBox(height: 8),
+              const IllustrativeNotice(compact: true),
+            ],
             const SizedBox(height: 8),
             FilledButton(
               onPressed: onDetails,
@@ -713,14 +811,14 @@ class _UnitListCard extends StatelessWidget {
     required this.onDetails,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final bool selected;
   final VoidCallback onSelect;
   final VoidCallback onDetails;
 
   @override
   Widget build(BuildContext context) {
-    final operational = unit.operationalData;
+    final operational = unit.currentOperationalData;
     return Card.outlined(
       key: ValueKey('unit-card-${unit.id}'),
       color: Colors.white,
@@ -761,10 +859,7 @@ class _UnitListCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
-                if (operational != null)
-                  AvailabilityPill(level: operational.availability)
-                else
-                  const Text('Dados operacionais indisponíveis'),
+                UnitAvailabilityStatus(unit: unit),
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 10),
                   child: Divider(height: 1),
@@ -807,7 +902,7 @@ class _ComparisonCard extends StatelessWidget {
     required this.onDetails,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final TravelMode mode;
   final bool selected;
   final VoidCallback onSelect;
@@ -815,7 +910,7 @@ class _ComparisonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final operational = unit.operationalData;
+    final operational = unit.currentOperationalData;
     final route = unit.routeFor(mode);
     return Card.outlined(
       color: Colors.white,
@@ -855,10 +950,7 @@ class _ComparisonCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
-                if (operational != null)
-                  AvailabilityPill(level: operational.availability)
-                else
-                  const Text('Dados operacionais indisponíveis'),
+                UnitAvailabilityStatus(unit: unit),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -957,12 +1049,14 @@ class _EmptyResults extends StatelessWidget {
   const _EmptyResults({
     required this.title,
     required this.message,
+    this.icon = Icons.place_outlined,
     this.actionLabel,
     this.onAction,
   });
 
   final String title;
   final String message;
+  final IconData icon;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -974,7 +1068,7 @@ class _EmptyResults extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.place_outlined, size: 42, color: AppColors.muted),
+            Icon(icon, size: 42, color: AppColors.muted),
             const SizedBox(height: 12),
             Text(
               title,
@@ -997,6 +1091,77 @@ class _EmptyResults extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LoadingUnits extends StatelessWidget {
+  const _LoadingUnits();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.background,
+      child: Center(
+        child: Semantics(
+          liveRegion: true,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                'Carregando unidades…',
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: AppColors.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LoadFailure extends StatelessWidget {
+  const _LoadFailure({required this.kind, required this.onRetry});
+
+  final HealthApiFailureKind kind;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final (title, message, icon) = switch (kind) {
+      HealthApiFailureKind.connection => (
+        'Sem conexão com o servidor',
+        'Não conseguimos carregar as unidades. Verifique sua conexão e tente novamente.',
+        Icons.cloud_off_outlined,
+      ),
+      HealthApiFailureKind.timeout => (
+        'O servidor demorou a responder',
+        'Não conseguimos carregar as unidades a tempo. Tente novamente.',
+        Icons.schedule_outlined,
+      ),
+      HealthApiFailureKind.server => (
+        'Serviço indisponível no momento',
+        'O servidor encontrou um problema ao buscar as unidades. Tente novamente em instantes.',
+        Icons.error_outline,
+      ),
+      HealthApiFailureKind.client || HealthApiFailureKind.invalidResponse => (
+        'Não foi possível carregar as unidades',
+        'A resposta do servidor não pôde ser usada. Tente novamente em instantes.',
+        Icons.error_outline,
+      ),
+    };
+    return ColoredBox(
+      color: AppColors.background,
+      child: _EmptyResults(
+        title: title,
+        message: message,
+        icon: icon,
+        actionLabel: 'Tentar novamente',
+        onAction: onRetry,
       ),
     );
   }

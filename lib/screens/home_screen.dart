@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/theme/app_colors.dart';
@@ -16,9 +17,11 @@ class HomeScreen extends StatefulWidget {
     this.locationAccess,
     this.mapBuilder,
     this.onLocationAccepted,
+    this.unitRepository,
   });
 
   final LocationAccess? locationAccess;
+  final HealthUnitRepository? unitRepository;
   final Widget Function(BuildContext, Position)? mapBuilder;
   final VoidCallback? onLocationAccepted;
 
@@ -176,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : const Duration(milliseconds: 220),
         pageBuilder: (context, animation, secondaryAnimation) =>
             widget.mapBuilder?.call(context, position) ??
-            MapScreen(position: position),
+            MapScreen(position: position, repository: widget.unitRepository),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           if (reduceMotion) return child;
           return AnimatedBuilder(

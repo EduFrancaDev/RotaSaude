@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/theme/app_theme.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
@@ -11,7 +11,7 @@ class RoutePreviewScreen extends StatefulWidget {
     super.key,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final TravelMode initialMode;
 
   @override
@@ -86,7 +86,7 @@ class _RouteContent extends StatelessWidget {
     required this.route,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final TravelMode mode;
   final UnitRoutePreview route;
 
@@ -230,7 +230,7 @@ class _RouteStep extends StatelessWidget {
 class _RouteUnavailable extends StatelessWidget {
   const _RouteUnavailable({required this.unit, required this.mode});
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
   final TravelMode mode;
 
   @override
@@ -244,7 +244,7 @@ class _RouteUnavailable extends StatelessWidget {
             const Icon(Icons.route_outlined, size: 44, color: AppColors.muted),
             const SizedBox(height: 12),
             Text(
-              'Rota indisponível no protótipo',
+              'Rota indisponível',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 color: AppColors.navy,
                 fontWeight: FontWeight.w700,
@@ -253,7 +253,7 @@ class _RouteUnavailable extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Não há uma prévia de ${mode.label.toLowerCase()} para ${unit.name}.',
+              'O cálculo de rotas e deslocamento de ${mode.label.toLowerCase()} até ${unit.name} ainda não está disponível nesta versão.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted),
             ),

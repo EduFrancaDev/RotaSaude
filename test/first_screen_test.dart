@@ -8,6 +8,8 @@ import 'package:rotasaude/screens/home_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/location_onboarding_store.dart';
 
+import 'support/health_unit_fixtures.dart';
+
 void main() {
   Future<void> showHome(
     WidgetTester tester,
@@ -265,7 +267,11 @@ void main() {
     final store = MemoryLocationOnboardingStore();
 
     await tester.pumpWidget(
-      RotaSaudeApp(locationAccess: location, onboardingStore: store),
+      RotaSaudeApp(
+        locationAccess: location,
+        onboardingStore: store,
+        unitRepository: FakeHealthUnitRepository(),
+      ),
     );
     await tester.pump();
     await tester.pump();
@@ -282,7 +288,11 @@ void main() {
     final store = MemoryLocationOnboardingStore();
 
     await tester.pumpWidget(
-      RotaSaudeApp(locationAccess: location, onboardingStore: store),
+      RotaSaudeApp(
+        locationAccess: location,
+        onboardingStore: store,
+        unitRepository: FakeHealthUnitRepository(),
+      ),
     );
     await tester.pump();
     await tester.pump();
@@ -303,7 +313,11 @@ void main() {
     final store = MemoryLocationOnboardingStore(accepted: true);
 
     await tester.pumpWidget(
-      RotaSaudeApp(locationAccess: location, onboardingStore: store),
+      RotaSaudeApp(
+        locationAccess: location,
+        onboardingStore: store,
+        unitRepository: FakeHealthUnitRepository(),
+      ),
     );
     await tester.pump();
     await tester.pump();
@@ -327,6 +341,7 @@ void main() {
       RotaSaudeApp(
         locationAccess: location,
         onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+        unitRepository: FakeHealthUnitRepository(),
       ),
     );
     await tester.pumpAndSettle();

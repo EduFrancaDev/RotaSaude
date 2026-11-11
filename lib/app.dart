@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:rotasaude/screens/home_screen.dart';
 import 'package:rotasaude/screens/location_required_screen.dart';
+import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/location_onboarding_store.dart';
@@ -9,10 +10,18 @@ import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/theme/app_theme.dart';
 
 class RotaSaudeApp extends StatefulWidget {
-  const RotaSaudeApp({super.key, this.locationAccess, this.onboardingStore});
+  const RotaSaudeApp({
+    super.key,
+    this.locationAccess,
+    this.onboardingStore,
+    this.unitRepository,
+  });
 
   final LocationAccess? locationAccess;
   final LocationOnboardingStore? onboardingStore;
+
+  /// Fonte das unidades; sem ela, o mapa consulta a API configurada.
+  final HealthUnitRepository? unitRepository;
 
   @override
   State<RotaSaudeApp> createState() => _RotaSaudeAppState();
@@ -121,9 +130,13 @@ class _RotaSaudeAppState extends State<RotaSaudeApp>
               body: Center(child: CircularProgressIndicator()),
             )
           : _accepted
-          ? _ReturningMap(locationAccess: _locationAccess)
+          ? _ReturningMap(
+              locationAccess: _locationAccess,
+              unitRepository: widget.unitRepository,
+            )
           : HomeScreen(
               locationAccess: _locationAccess,
+              unitRepository: widget.unitRepository,
               onLocationAccepted: _markAccepted,
             ),
     );
@@ -131,9 +144,10 @@ class _RotaSaudeAppState extends State<RotaSaudeApp>
 }
 
 class _ReturningMap extends StatefulWidget {
-  const _ReturningMap({required this.locationAccess});
+  const _ReturningMap({required this.locationAccess, this.unitRepository});
 
   final LocationAccess locationAccess;
+  final HealthUnitRepository? unitRepository;
 
   @override
   State<_ReturningMap> createState() => _ReturningMapState();
@@ -160,7 +174,10 @@ class _ReturningMapState extends State<_ReturningMap> {
       future: _position,
       builder: (context, snapshot) {
         if (snapshot.hasData) {
-          return MapScreen(position: snapshot.data!);
+          return MapScreen(
+            position: snapshot.data!,
+            repository: widget.unitRepository,
+          );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
