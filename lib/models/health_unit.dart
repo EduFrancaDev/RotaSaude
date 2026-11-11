@@ -72,9 +72,13 @@ class SearchArea {
   static const suggestions = [goiania, aparecida];
 
   static SearchArea? fromPosition(Position position) {
+    return fromCoordinate(LatLng(position.latitude, position.longitude));
+  }
+
+  static SearchArea? fromCoordinate(LatLng coordinate) {
     final distance = Geolocator.distanceBetween(
-      position.latitude,
-      position.longitude,
+      coordinate.latitude,
+      coordinate.longitude,
       goiania.center.latitude,
       goiania.center.longitude,
     );
@@ -190,7 +194,11 @@ class HealthUnit {
 
   /// Dados operacionais que podem ser mostrados como atuais, ou `null`.
   UnitOperationalData? get currentOperationalData =>
-      operationalState() == OperationalDataState.current
+      currentOperationalDataAt(DateTime.now());
+
+  /// Mesmo que [currentOperationalData], avaliado em [now] (testes e relógio local).
+  UnitOperationalData? currentOperationalDataAt(DateTime now) =>
+      operationalState(now: now) == OperationalDataState.current
       ? operationalData
       : null;
 

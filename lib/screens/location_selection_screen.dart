@@ -142,7 +142,9 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      'Sua localização do aparelho continua necessária. A cidade escolhida altera somente a área de consulta e pode ser mudada a qualquer momento.',
+                      'A cidade escolhida altera somente a área de consulta à '
+                      'API. Distâncias e rotas usam a origem (GPS ou ponto '
+                      'manual) definida na entrada do app.',
                       style: textTheme.bodyMedium?.copyWith(
                         color: AppColors.navy,
                         height: 1.4,

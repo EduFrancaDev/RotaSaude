@@ -19,25 +19,37 @@ extension HealthUnitStatusText on HealthUnit {
 
   /// Texto curto do estado operacional, para marcadores e rótulos
   /// acessíveis. Nunca apresenta dado antigo como atual.
-  String get operationalSummary => switch (operationalState()) {
-    OperationalDataState.current =>
-      currentAvailability?.label ?? 'Disponibilidade não informada',
-    OperationalDataState.stale => 'Dados desatualizados',
-    OperationalDataState.missing => 'Dados operacionais indisponíveis',
-  };
+  String get operationalSummary => operationalSummaryAt(DateTime.now());
+
+  String operationalSummaryAt(DateTime now) =>
+      switch (operationalState(now: now)) {
+        OperationalDataState.current =>
+          currentOperationalDataAt(now)?.availability?.label ??
+              'Disponibilidade não informada',
+        OperationalDataState.stale => 'Dados desatualizados',
+        OperationalDataState.missing => 'Dados operacionais indisponíveis',
+      };
 }
+
+/// Rótulo da coluna de tempo de deslocamento de carro (rota OSRM na tela de rota).
+const carRouteDurationMetricLabel = 'tempo de carro';
+const carRouteDurationUnavailable = 'Indisponível';
 
 /// Indicador de disponibilidade da unidade, ou o motivo de não haver um.
 class UnitAvailabilityStatus extends StatelessWidget {
-  const UnitAvailabilityStatus({required this.unit, super.key});
+  const UnitAvailabilityStatus({required this.unit, this.now, super.key});
 
   final HealthUnit unit;
 
+  /// Instante de referência para a janela de 30 minutos; `null` usa o relógio do aparelho.
+  final DateTime? now;
+
   @override
   Widget build(BuildContext context) {
-    final level = unit.currentAvailability;
+    final instant = now ?? DateTime.now();
+    final level = unit.currentOperationalDataAt(instant)?.availability;
     if (level != null) return AvailabilityPill(level: level);
-    return Text(unit.operationalSummary);
+    return Text(unit.operationalSummaryAt(instant));
   }
 }
 
@@ -162,18 +174,29 @@ class MetricColumn extends StatelessWidget {
       CrossAxisAlignment.end => TextAlign.end,
       _ => TextAlign.start,
     };
+    final valueAlign = switch (alignment) {
+      CrossAxisAlignment.center => Alignment.center,
+      CrossAxisAlignment.end => Alignment.centerRight,
+      _ => Alignment.centerLeft,
+    };
     return Expanded(
       child: Column(
         crossAxisAlignment: alignment,
         children: [
-          Text(
-            value,
-            textAlign: textAlign,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-              fontSize: compact ? 20 : null,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: valueAlign,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              textAlign: textAlign,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+                fontSize: compact ? 20 : null,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
           const SizedBox(height: 2),

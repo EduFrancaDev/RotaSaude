@@ -9,6 +9,7 @@ class UnitDetailsScreen extends StatelessWidget {
     required this.unit,
     required this.straightLineKm,
     required this.onRoute,
+    this.operationalNow,
     super.key,
   });
 
@@ -18,9 +19,14 @@ class UnitDetailsScreen extends StatelessWidget {
   final double? straightLineKm;
   final ValueChanged<TravelMode>? onRoute;
 
+  /// Referência temporal para a janela de 30 minutos; `null` usa o relógio do aparelho.
+  final DateTime? operationalNow;
+
   @override
   Widget build(BuildContext context) {
-    final operational = unit.currentOperationalData;
+    final now = operationalNow ?? DateTime.now();
+    final operational = unit.currentOperationalDataAt(now);
+    final operationalState = unit.operationalState(now: now);
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -51,11 +57,14 @@ class UnitDetailsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             if (operational == null) ...[
-              _UnavailableDataCard(unit: unit),
+              switch (operationalState) {
+                OperationalDataState.stale => _StaleDataCard(unit: unit),
+                _ => _UnavailableDataCard(unit: unit),
+              },
               const SizedBox(height: 14),
               _StraightLineDistanceCard(straightLineKm: straightLineKm),
             ] else ...[
-              UnitAvailabilityStatus(unit: unit),
+              UnitAvailabilityStatus(unit: unit, now: now),
               if (unit.isDemo) ...[
                 const SizedBox(height: 8),
                 const IllustrativeNotice(compact: true),
@@ -207,6 +216,58 @@ class _StraightLineDistanceCard extends StatelessWidget {
   }
 }
 
+class _StaleDataCard extends StatelessWidget {
+  const _StaleDataCard({required this.unit});
+
+  final HealthUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card.outlined(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const CircleAvatar(
+              backgroundColor: AppColors.background,
+              child: Icon(Icons.history, color: AppColors.muted),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Dados desatualizados',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'A última leitura desta unidade passou da janela de atualização. '
+              'Não mostramos espera ou disponibilidade antigas como se fossem atuais.',
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppColors.muted, height: 1.4),
+            ),
+            if (unit.operationalData?.updatedAt case final updatedAt?) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Última atualização recebida: ${formatUpdateTime(updatedAt)}.',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.muted),
+              ),
+            ],
+            if (unit.isDemo) ...[
+              const SizedBox(height: 12),
+              const IllustrativeNotice(compact: true),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _UnavailableDataCard extends StatelessWidget {
   const _UnavailableDataCard({required this.unit});
 
@@ -227,7 +288,7 @@ class _UnavailableDataCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'Dados temporariamente indisponíveis',
+              'Dados operacionais indisponíveis',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: AppColors.navy,
                 fontWeight: FontWeight.w700,
@@ -235,7 +296,8 @@ class _UnavailableDataCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Esta unidade não enviou informações recentes. Não mostramos espera ou disponibilidade antigas como se fossem atuais.',
+              'Esta unidade ainda não enviou leituras operacionais utilizáveis. '
+              'Não inferimos espera nem disponibilidade.',
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: AppColors.muted, height: 1.4),
             ),

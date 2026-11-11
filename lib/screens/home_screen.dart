@@ -3,9 +3,13 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart' hide Path;
+import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
+import 'package:rotasaude/screens/manual_location_picker_screen.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
+import 'package:rotasaude/services/user_location_session_store.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 
 enum _LocationIssue { denied, blocked, serviceOff, positionFailed }
@@ -15,14 +19,16 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     this.locationAccess,
+    this.sessionStore,
     this.mapBuilder,
     this.onLocationAccepted,
     this.unitRepository,
   });
 
   final LocationAccess? locationAccess;
+  final UserLocationSessionStore? sessionStore;
   final HealthUnitRepository? unitRepository;
-  final Widget Function(BuildContext, Position)? mapBuilder;
+  final Widget Function(BuildContext, UserLocationOrigin)? mapBuilder;
   final VoidCallback? onLocationAccepted;
 
   @override
@@ -33,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final GlobalKey _buttonKey = GlobalKey();
   late final LocationAccess _locationAccess =
       widget.locationAccess ?? const DeviceLocationAccess();
+  late final UserLocationSessionStore _sessionStore =
+      widget.sessionStore ?? const SharedUserLocationSessionStore();
 
   _LocationIssue? _issue;
   bool _busy = false;
@@ -134,8 +142,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _busy = false;
         _navigating = true;
       });
+      final origin = UserLocationOrigin.fromGps(position);
+      await _sessionStore.save(origin);
       widget.onLocationAccepted?.call();
-      await _openMap(position);
+      await _openMap(origin);
       if (mounted) setState(() => _navigating = false);
     } on LocationServiceDisabledException {
       _showIssue(_LocationIssue.serviceOff);
@@ -161,10 +171,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openMap(Position position) async {
+  Future<void> _openManualLocation() async {
+    if (_busy || _navigating || !mounted) return;
+    setState(() => _busy = true);
+    final picked = await Navigator.of(context).push<LatLng>(
+      MaterialPageRoute<LatLng>(
+        fullscreenDialog: true,
+        builder: (_) => const ManualLocationPickerScreen(),
+      ),
+    );
+    if (!mounted) return;
+    if (picked == null) {
+      setState(() => _busy = false);
+      return;
+    }
+    final origin = UserLocationOrigin.manual(picked);
+    await _sessionStore.save(origin);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _issue = null;
+    });
+    // Com [onLocationAccepted], o app raiz troca para o mapa principal.
+    if (widget.onLocationAccepted != null) {
+      widget.onLocationAccepted!();
+      return;
+    }
+    setState(() => _navigating = true);
+    await _openMap(origin);
+    if (mounted) setState(() => _navigating = false);
+  }
+
+  Future<void> _openMap(UserLocationOrigin userOrigin) async {
     final renderBox =
         _buttonKey.currentContext?.findRenderObject() as RenderBox?;
-    final origin = renderBox == null
+    final revealOrigin = renderBox == null
         ? MediaQuery.sizeOf(context).center(Offset.zero)
         : renderBox.localToGlobal(renderBox.size.center(Offset.zero));
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -178,8 +219,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ? Duration.zero
             : const Duration(milliseconds: 220),
         pageBuilder: (context, animation, secondaryAnimation) =>
-            widget.mapBuilder?.call(context, position) ??
-            MapScreen(position: position, repository: widget.unitRepository),
+            widget.mapBuilder?.call(context, userOrigin) ??
+            MapScreen(
+              userOrigin: userOrigin,
+              repository: widget.unitRepository,
+            ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           if (reduceMotion) return child;
           return AnimatedBuilder(
@@ -196,7 +240,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ClipPath(
                     key: const ValueKey('map-reveal'),
                     clipper: _CircularRevealClipper(
-                      origin: origin,
+                      origin: revealOrigin,
                       progress: progress,
                     ),
                     child: child,
@@ -204,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   IgnorePointer(
                     child: CustomPaint(
                       painter: _RevealRingPainter(
-                        origin: origin,
+                        origin: revealOrigin,
                         progress: progress,
                       ),
                     ),
@@ -336,23 +380,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   ),
                                 ),
                                 child: _busy
-                                    ? const Row(
+                                    ? Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          SizedBox.square(
+                                          const SizedBox.square(
                                             dimension: 18,
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
                                               color: Colors.white,
                                             ),
                                           ),
-                                          SizedBox(width: 12),
-                                          Text('Obtendo localização…'),
+                                          const SizedBox(width: 12),
+                                          Flexible(
+                                            child: Text(
+                                              'Obtendo localização…',
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
                                         ],
                                       )
                                     : Text(_buttonLabel),
+                              ),
+                              const SizedBox(height: 12),
+                              OutlinedButton(
+                                onPressed: _busy || _navigating
+                                    ? null
+                                    : _openManualLocation,
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(52),
+                                  foregroundColor: AppColors.blue,
+                                  side: const BorderSide(color: AppColors.blue),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Escolher localização manualmente',
+                                ),
                               ),
                             ],
                           ),

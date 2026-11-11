@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:rotasaude/app.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/screens/home_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/location_onboarding_store.dart';
+import 'package:rotasaude/services/user_location_session_store.dart';
 
 import 'support/health_unit_fixtures.dart';
 
@@ -19,7 +21,8 @@ void main() {
       MaterialApp(
         home: HomeScreen(
           locationAccess: location,
-          mapBuilder: (context, position) =>
+          sessionStore: MemoryUserLocationSessionStore(),
+          mapBuilder: (context, origin) =>
               const Scaffold(body: Center(child: Text('Mapa de teste'))),
         ),
       ),
@@ -245,7 +248,8 @@ void main() {
           ),
           child: HomeScreen(
             locationAccess: location,
-            mapBuilder: (context, position) =>
+            sessionStore: MemoryUserLocationSessionStore(),
+            mapBuilder: (context, origin) =>
                 const Scaffold(body: Text('Mapa de teste')),
           ),
         ),
@@ -270,6 +274,7 @@ void main() {
       RotaSaudeApp(
         locationAccess: location,
         onboardingStore: store,
+        sessionStore: MemoryUserLocationSessionStore(),
         unitRepository: FakeHealthUnitRepository(),
       ),
     );
@@ -291,14 +296,14 @@ void main() {
       RotaSaudeApp(
         locationAccess: location,
         onboardingStore: store,
+        sessionStore: MemoryUserLocationSessionStore(),
         unitRepository: FakeHealthUnitRepository(),
       ),
     );
     await tester.pump();
     await tester.pump();
     await tester.tap(find.text('Usar minha localização'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 900));
+    await tester.pumpAndSettle();
 
     expect(store.accepted, isTrue);
     expect(find.text('Mapa'), findsOneWidget);
@@ -316,6 +321,7 @@ void main() {
       RotaSaudeApp(
         locationAccess: location,
         onboardingStore: store,
+        sessionStore: MemoryUserLocationSessionStore(),
         unitRepository: FakeHealthUnitRepository(),
       ),
     );
@@ -330,6 +336,115 @@ void main() {
     expect(location.locationSettingsCount, 1);
   });
 
+  testWidgets('retomar o app mantém o mapa sem tela de carregamento', (
+    tester,
+  ) async {
+    final location = FakeLocationAccess()
+      ..permission = LocationPermission.whileInUse
+      ..fixedPosition = Position(
+        latitude: SearchArea.goiania.center.latitude,
+        longitude: SearchArea.goiania.center.longitude,
+        timestamp: DateTime(2026),
+        accuracy: 10,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+    final store = MemoryLocationOnboardingStore(accepted: true);
+
+    await tester.pumpWidget(
+      RotaSaudeApp(
+        locationAccess: location,
+        onboardingStore: store,
+        sessionStore: MemoryUserLocationSessionStore(),
+        unitRepository: FakeHealthUnitRepository(
+          unitsByCity: {'Goiânia': goianiaUnits()},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Lista'), findsOneWidget);
+    expect(find.text('Obtendo localização…'), findsNothing);
+
+    final pending = Completer<Position>();
+    location.pendingPosition = pending;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(find.text('Lista'), findsOneWidget);
+    expect(find.text('Obtendo localização…'), findsNothing);
+
+    pending.complete(
+      Position(
+        latitude: SearchArea.goiania.center.latitude + 0.01,
+        longitude: SearchArea.goiania.center.longitude,
+        timestamp: DateTime(2026, 1, 2),
+        accuracy: 10,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Obtendo localização…'), findsNothing);
+    expect(location.positionCount, greaterThanOrEqualTo(2));
+  });
+
+  testWidgets('falha ao atualizar GPS preserva mapa e avisa posição antiga', (
+    tester,
+  ) async {
+    final location = FakeLocationAccess()
+      ..permission = LocationPermission.whileInUse
+      ..fixedPosition = Position(
+        latitude: SearchArea.goiania.center.latitude,
+        longitude: SearchArea.goiania.center.longitude,
+        timestamp: DateTime(2026),
+        accuracy: 10,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+    await tester.pumpWidget(
+      RotaSaudeApp(
+        locationAccess: location,
+        onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+        sessionStore: MemoryUserLocationSessionStore(),
+        unitRepository: FakeHealthUnitRepository(
+          unitsByCity: {'Goiânia': goianiaUnits()},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    location
+      ..positionError = TimeoutException('falha')
+      ..pendingPosition = null;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Lista'), findsOneWidget);
+    expect(
+      find.text('Sua localização pode estar desatualizada.'),
+      findsOneWidget,
+    );
+    expect(find.text('Obtendo localização…'), findsNothing);
+  });
+
   testWidgets('retorno ao app permite tentar novamente após falha de posição', (
     tester,
   ) async {
@@ -341,6 +456,7 @@ void main() {
       RotaSaudeApp(
         locationAccess: location,
         onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+        sessionStore: MemoryUserLocationSessionStore(),
         unitRepository: FakeHealthUnitRepository(),
       ),
     );
@@ -388,6 +504,7 @@ class FakeLocationAccess implements LocationAccess {
   bool serviceEnabled = true;
   Object? positionError;
   Completer<Position>? pendingPosition;
+  Position? fixedPosition;
   int checkCount = 0;
   int requestCount = 0;
   int serviceCount = 0;
@@ -418,7 +535,8 @@ class FakeLocationAccess implements LocationAccess {
   Future<Position> getCurrentPosition() async {
     positionCount++;
     if (positionError case final error?) throw error;
-    return pendingPosition?.future ?? testPosition;
+    if (pendingPosition case final pending?) return pending.future;
+    return fixedPosition ?? testPosition;
   }
 
   @override

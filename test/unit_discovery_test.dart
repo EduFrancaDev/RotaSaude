@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:rotasaude/app.dart';
@@ -11,9 +12,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/driving_route.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
+import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/location_onboarding_store.dart';
+import 'package:rotasaude/services/user_location_session_store.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 
@@ -50,7 +53,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: MapScreen(
-          position: goianiaPosition(),
+          userOrigin: UserLocationOrigin.fromGps(goianiaPosition()),
           repository: repository ?? goianiaRepository(),
           routeRepository: routeRepository ?? fakeRouteRepository(),
         ),
@@ -64,6 +67,72 @@ void main() {
     await tester.tap(find.text('Lista'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'aba Mapa não exibe aviso de origem manual nem dados ilustrativos',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MapScreen(
+            userOrigin: UserLocationOrigin.manual(SearchArea.goiania.center),
+            repository: goianiaRepository(),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('Origem manual no mapa'), findsNothing);
+      expect(find.textContaining('Dados ilustrativos'), findsNothing);
+    },
+  );
+
+  testWidgets('métrica Indisponível não quebra em mais de uma linha', (
+    tester,
+  ) async {
+    await openDiscovery(tester);
+
+    for (final element in find.text('Indisponível').evaluate()) {
+      final paragraph = element.renderObject! as RenderParagraph;
+      final boxes = paragraph
+          .getBoxesForSelection(
+            TextSelection(
+              baseOffset: 0,
+              extentOffset: paragraph.text.toPlainText().length,
+            ),
+          )
+          .where((box) => box.right > box.left)
+          .toList();
+      expect(boxes.length, lessThanOrEqualTo(1));
+    }
+  });
+
+  testWidgets('arrastar card da UPA para baixo o oculta; outra UPA reabre', (
+    tester,
+  ) async {
+    await openDiscovery(tester);
+
+    const summaryKey = ValueKey('map-unit-summary-card');
+    expect(find.byKey(summaryKey), findsOneWidget);
+
+    await tester.drag(find.byKey(summaryKey), const Offset(0, 160));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(summaryKey), findsNothing);
+    expect(find.text('Ver detalhes'), findsNothing);
+
+    await tester.tap(
+      find.bySemanticsLabel('UPA Exemplo Norte, Baixa disponibilidade'),
+    );
+    await tester.pump();
+
+    expect(find.byKey(summaryKey), findsOneWidget);
+    expect(find.text('UPA Exemplo Norte'), findsOneWidget);
+  });
 
   testWidgets('mostra carregamento e depois as unidades da API', (
     tester,
@@ -283,7 +352,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: MapScreen(
-          position: goianiaPosition(),
+          userOrigin: UserLocationOrigin.fromGps(goianiaPosition()),
           userLocationAvailable: false,
           repository: goianiaRepository(),
         ),
@@ -327,7 +396,10 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: MapScreen(position: farPosition, repository: repository),
+        home: MapScreen(
+          userOrigin: UserLocationOrigin.fromGps(farPosition),
+          repository: repository,
+        ),
       ),
     );
     await tester.pump();
@@ -451,7 +523,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Ver detalhes de UPA Antiga'));
     await tester.pumpAndSettle();
-    expect(find.text('Dados temporariamente indisponíveis'), findsOneWidget);
+    expect(find.text('Dados desatualizados'), findsWidgets);
     expect(find.textContaining('Última atualização recebida'), findsOneWidget);
     expect(find.text('Ver opções de rota'), findsNothing);
     semantics.dispose();
@@ -608,7 +680,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('UPA Exemplo Oeste'), findsOneWidget);
-    expect(find.text('Dados temporariamente indisponíveis'), findsOneWidget);
+    expect(find.text('Dados operacionais indisponíveis'), findsOneWidget);
     expect(find.text('Espera estimada'), findsNothing);
     expect(find.text('Ver outras unidades'), findsOneWidget);
     final oesteKm = formatStraightLineDistanceValue(
@@ -629,7 +701,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: MapScreen(
-            position: goianiaPosition(),
+            userOrigin: UserLocationOrigin.fromGps(goianiaPosition()),
             userLocationAvailable: false,
             repository: goianiaRepository(),
           ),
@@ -650,11 +722,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Detalhes da unidade'), findsOneWidget);
-      expect(find.text('Dados temporariamente indisponíveis'), findsOneWidget);
+      expect(find.text('Dados operacionais indisponíveis'), findsOneWidget);
       expect(
         find.descendant(
           of: find.ancestor(
-            of: find.text('Dados temporariamente indisponíveis'),
+            of: find.text('Dados operacionais indisponíveis'),
             matching: find.byType(Scaffold),
           ),
           matching: find.text(straightLineDistanceUnavailable),
@@ -685,38 +757,65 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets(
-    'localização do aparelho continua obrigatória após cidade manual',
-    (tester) async {
-      final access = _TestLocationAccess();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: RotaSaudeApp(
-            locationAccess: access,
-            onboardingStore: MemoryLocationOnboardingStore(accepted: true),
-            unitRepository: FakeHealthUnitRepository(
-              unitsByCity: {'Goiânia': goianiaUnits()},
-            ),
+  testWidgets('modo GPS continua bloqueado sem serviço após troca de cidade', (
+    tester,
+  ) async {
+    final access = _TestLocationAccess();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RotaSaudeApp(
+          locationAccess: access,
+          onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+          sessionStore: MemoryUserLocationSessionStore(),
+          unitRepository: FakeHealthUnitRepository(
+            unitsByCity: {'Goiânia': goianiaUnits()},
           ),
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Goiânia, GO'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Aparecida de Goiânia, GO'));
-      await tester.pump();
-      await tester.tap(find.text('Ver unidades em Aparecida de Goiânia'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Goiânia, GO'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Aparecida de Goiânia, GO'));
+    await tester.pump();
+    await tester.tap(find.text('Ver unidades em Aparecida de Goiânia'));
+    await tester.pumpAndSettle();
 
-      access.serviceEnabled = false;
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pumpAndSettle();
+    access.serviceEnabled = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-      expect(find.text('Ative a localização'), findsOneWidget);
-    },
-  );
+    expect(find.text('Ative a localização'), findsOneWidget);
+  });
+
+  testWidgets('modo manual permanece sem bloqueio ao desligar GPS', (
+    tester,
+  ) async {
+    final access = _TestLocationAccess()..serviceEnabled = false;
+    final manual = UserLocationOrigin.manual(SearchArea.goiania.center);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RotaSaudeApp(
+          locationAccess: access,
+          onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+          sessionStore: MemoryUserLocationSessionStore(origin: manual),
+          unitRepository: FakeHealthUnitRepository(
+            unitsByCity: {'Goiânia': goianiaUnits()},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Lista'), findsOneWidget);
+    expect(find.text('Ative a localização'), findsNothing);
+    expect(find.textContaining('Origem manual no mapa'), findsNothing);
+    expect(find.text('Usar GPS do aparelho'), findsOneWidget);
+  });
 }
 
 /// Repositório cuja consulta só termina quando o teste libera.

@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/driving_route.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/services/location_access.dart';
@@ -20,17 +21,23 @@ class RoutePreviewScreen extends StatefulWidget {
     required this.unit,
     required this.initialMode,
     required this.initialOrigin,
+    this.originKind = LocationOriginKind.deviceGps,
     this.routeRepository,
     this.locationAccess,
+    this.onChooseManualOrigin,
+    this.onSwitchToGps,
     super.key,
   });
 
   final HealthUnit unit;
   final TravelMode initialMode;
   final LatLng initialOrigin;
+  final LocationOriginKind originKind;
 
   final RouteRepository? routeRepository;
   final LocationAccess? locationAccess;
+  final Future<LatLng?> Function()? onChooseManualOrigin;
+  final Future<void> Function()? onSwitchToGps;
 
   @override
   State<RoutePreviewScreen> createState() => _RoutePreviewScreenState();
@@ -118,6 +125,13 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
   }
 
   Future<void> _refreshOrigin() async {
+    if (widget.originKind == LocationOriginKind.manualMap) {
+      final picked = await widget.onChooseManualOrigin?.call();
+      if (!mounted || picked == null) return;
+      setState(() => _origin = picked);
+      await _loadDrivingRoute();
+      return;
+    }
     _LocationIssue? issue;
     LatLng? origin;
     try {
@@ -240,6 +254,7 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
               : _DrivingRouteContent(
                   unit: widget.unit,
                   origin: _origin,
+                  originKind: widget.originKind,
                   route: _route!,
                   mapController: _mapController,
                   onRefreshOrigin: _refreshOrigin,
@@ -253,6 +268,7 @@ class _DrivingRouteContent extends StatelessWidget {
   const _DrivingRouteContent({
     required this.unit,
     required this.origin,
+    required this.originKind,
     required this.route,
     required this.mapController,
     required this.onRefreshOrigin,
@@ -260,6 +276,7 @@ class _DrivingRouteContent extends StatelessWidget {
 
   final HealthUnit unit;
   final LatLng origin;
+  final LocationOriginKind originKind;
   final DrivingRoute route;
   final MapController mapController;
   final VoidCallback onRefreshOrigin;
@@ -306,8 +323,10 @@ class _DrivingRouteContent extends StatelessWidget {
                           point: origin,
                           width: 40,
                           height: 40,
-                          child: const Icon(
-                            Icons.my_location_rounded,
+                          child: Icon(
+                            originKind == LocationOriginKind.manualMap
+                                ? Icons.place_rounded
+                                : Icons.my_location_rounded,
                             color: AppColors.blue,
                             size: 28,
                           ),
@@ -423,8 +442,17 @@ class _DrivingRouteContent extends StatelessWidget {
         const SizedBox(height: 16),
         OutlinedButton.icon(
           onPressed: onRefreshOrigin,
-          icon: const Icon(Icons.my_location_outlined, size: 18),
-          label: const Text('Atualizar minha posição'),
+          icon: Icon(
+            originKind == LocationOriginKind.manualMap
+                ? Icons.edit_location_alt_outlined
+                : Icons.my_location_outlined,
+            size: 18,
+          ),
+          label: Text(
+            originKind == LocationOriginKind.manualMap
+                ? 'Alterar ponto manual'
+                : 'Atualizar minha posição',
+          ),
         ),
       ],
     );
