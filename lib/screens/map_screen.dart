@@ -9,6 +9,7 @@ import 'package:rotasaude/screens/availability_screen.dart';
 import 'package:rotasaude/screens/location_selection_screen.dart';
 import 'package:rotasaude/screens/route_preview_screen.dart';
 import 'package:rotasaude/screens/unit_details_screen.dart';
+import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/theme/app_theme.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
@@ -20,12 +21,16 @@ enum _LoadStatus { loading, loaded, failed }
 class MapScreen extends StatefulWidget {
   const MapScreen({
     required this.position,
+    this.userLocationAvailable = true,
     this.repository,
     this.routeRepository,
     super.key,
   });
 
   final Position position;
+
+  /// Quando falso, distâncias em linha reta não são calculadas (GPS indisponível).
+  final bool userLocationAvailable;
 
   /// Fonte das unidades. Sem ela, usa a API configurada em [ApiConfig].
   final HealthUnitRepository? repository;
@@ -56,11 +61,52 @@ class _MapScreenState extends State<MapScreen> {
   String? _selectedUnitId;
   final TextEditingController _searchController = TextEditingController();
 
+  LatLng? _cachedDistanceUser;
+  int _cachedDistanceUnitsGeneration = -1;
+  Map<String, double?> _straightLineKmByUnitId = const {};
+
+  LatLng? get _userPosition => widget.userLocationAvailable
+      ? LatLng(widget.position.latitude, widget.position.longitude)
+      : null;
+
   @override
   void initState() {
     super.initState();
     _loadUnits();
   }
+
+  @override
+  void didUpdateWidget(MapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.position.latitude != widget.position.latitude ||
+        oldWidget.position.longitude != widget.position.longitude ||
+        oldWidget.userLocationAvailable != widget.userLocationAvailable) {
+      _invalidateStraightLineCache();
+    }
+  }
+
+  void _invalidateStraightLineCache() {
+    _cachedDistanceUser = null;
+    _cachedDistanceUnitsGeneration = -1;
+    _straightLineKmByUnitId = const {};
+  }
+
+  Map<String, double?> get _straightLineKmLookup {
+    final user = _userPosition;
+    if (_cachedDistanceUser == user &&
+        _cachedDistanceUnitsGeneration == _loadGeneration) {
+      return _straightLineKmByUnitId;
+    }
+    _cachedDistanceUser = user;
+    _cachedDistanceUnitsGeneration = _loadGeneration;
+    _straightLineKmByUnitId = buildStraightLineDistanceLookup(
+      userPosition: user,
+      units: _units,
+    );
+    return _straightLineKmByUnitId;
+  }
+
+  double? _straightLineKm(HealthUnit unit) => _straightLineKmLookup[unit.id];
 
   @override
   void dispose() {
@@ -91,6 +137,7 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _failure = failure;
       _units = units;
+      _invalidateStraightLineCache();
       _loadStatus = failure == null ? _LoadStatus.loaded : _LoadStatus.failed;
       if (!units.any((unit) => unit.id == _selectedUnitId)) {
         _selectedUnitId = units.firstOrNull?.id;
@@ -117,6 +164,7 @@ class _MapScreenState extends State<MapScreen> {
           _serviceFilter == null || unit.services.contains(_serviceFilter);
       return matchesQuery && matchesService;
     }).toList();
+    final distances = _straightLineKmLookup;
     if (_sortOrder == 'Menor espera') {
       units.sort((a, b) {
         final aWait = a.currentOperationalData?.waitMinutes;
@@ -126,6 +174,15 @@ class _MapScreenState extends State<MapScreen> {
         if (bWait == null) return -1;
         return aWait.compareTo(bWait);
       });
+    } else if (_sortOrder == 'Proximidade') {
+      units.sort(
+        (a, b) => compareUnitsByStraightLineDistance(
+          a,
+          distances[a.id],
+          b,
+          distances[b.id],
+        ),
+      );
     }
     return units;
   }
@@ -149,6 +206,7 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _area = area;
       _units = const [];
+      _invalidateStraightLineCache();
       _failure = null;
       _loadStatus = area.city == null
           ? _LoadStatus.loaded
@@ -166,6 +224,7 @@ class _MapScreenState extends State<MapScreen> {
       MaterialPageRoute<void>(
         builder: (_) => UnitDetailsScreen(
           unit: unit,
+          straightLineKm: _straightLineKm(unit),
           onRoute: unit.currentOperationalData == null
               ? null
               : (mode) => _showRoute(unit, mode),
@@ -355,76 +414,78 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                   ),
                 for (final unit in units)
-                  Marker(
-                    point: unit.position,
-                    width: 120,
-                    height: 66,
-                    alignment: const Alignment(0, 0.36),
-                    child: Semantics(
-                      excludeSemantics: true,
-                      button: true,
-                      label: '${unit.name}, ${unit.operationalSummary}',
-                      selected: _selectedUnitId == unit.id,
-                      onTap: () => setState(() => _selectedUnitId = unit.id),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
+                  if (isValidGeographicPosition(unit.position))
+                    Marker(
+                      point: unit.position,
+                      width: 120,
+                      height: 66,
+                      alignment: const Alignment(0, 0.36),
+                      child: Semantics(
+                        excludeSemantics: true,
+                        button: true,
+                        label: '${unit.name}, ${unit.operationalSummary}',
+                        selected: _selectedUnitId == unit.id,
                         onTap: () => setState(() => _selectedUnitId = unit.id),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color:
-                                      unit.currentAvailability?.color ??
-                                      AppColors.muted,
-                                  width: 3,
-                                ),
-                              ),
-                              child: SizedBox(
-                                width: 42,
-                                height: 42,
-                                child: Icon(
-                                  Icons.local_hospital_outlined,
-                                  color:
-                                      unit.currentAvailability?.color ??
-                                      AppColors.muted,
-                                  size: 24,
-                                ),
-                              ),
-                            ),
-                            DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.92),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 1,
-                                ),
-                                child: Text(
-                                  unit.name.replaceFirst(
-                                    'UPA Exemplo ',
-                                    'UPA ',
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () =>
+                              setState(() => _selectedUnitId = unit.id),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color:
+                                        unit.currentAvailability?.color ??
+                                        AppColors.muted,
+                                    width: 3,
                                   ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: AppColors.navy,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
+                                ),
+                                child: SizedBox(
+                                  width: 42,
+                                  height: 42,
+                                  child: Icon(
+                                    Icons.local_hospital_outlined,
+                                    color:
+                                        unit.currentAvailability?.color ??
+                                        AppColors.muted,
+                                    size: 24,
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  child: Text(
+                                    unit.name.replaceFirst(
+                                      'UPA Exemplo ',
+                                      'UPA ',
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: AppColors.navy,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
               ],
             ),
           ],
@@ -480,6 +541,7 @@ class _MapScreenState extends State<MapScreen> {
             alignment: Alignment.bottomCenter,
             child: _MapUnitSummary(
               unit: _selectedUnit!,
+              straightLineKm: _straightLineKm(_selectedUnit!),
               onDetails: () => _showDetails(_selectedUnit!),
             ),
           ),
@@ -520,6 +582,7 @@ class _MapScreenState extends State<MapScreen> {
           final unit = units[index];
           return _UnitListCard(
             unit: unit,
+            straightLineKm: _straightLineKm(unit),
             selected: _selectedUnitId == unit.id,
             onSelect: () => setState(() => _selectedUnitId = unit.id),
             onDetails: () => _showDetails(unit),
@@ -594,7 +657,7 @@ class _MapScreenState extends State<MapScreen> {
                 child: _FilterDropdown<String>(
                   label: 'Ordenar',
                   value: _sortOrder,
-                  items: const ['Destaque', 'Menor espera'],
+                  items: const ['Destaque', 'Menor espera', 'Proximidade'],
                   itemLabel: (value) => value,
                   onChanged: (value) => setState(() => _sortOrder = value),
                 ),
@@ -627,6 +690,7 @@ class _MapScreenState extends State<MapScreen> {
           final unit = units[index];
           return _ComparisonCard(
             unit: unit,
+            straightLineKm: _straightLineKm(unit),
             mode: _travelMode,
             selected: _selectedUnitId == unit.id,
             onSelect: () => setState(() => _selectedUnitId = unit.id),
@@ -753,9 +817,14 @@ class _DiscoveryHeader extends StatelessWidget {
 }
 
 class _MapUnitSummary extends StatelessWidget {
-  const _MapUnitSummary({required this.unit, required this.onDetails});
+  const _MapUnitSummary({
+    required this.unit,
+    required this.straightLineKm,
+    required this.onDetails,
+  });
 
   final HealthUnit unit;
+  final double? straightLineKm;
   final VoidCallback onDetails;
 
   @override
@@ -790,10 +859,8 @@ class _MapUnitSummary extends StatelessWidget {
                     label: 'espera',
                   ),
                   MetricColumn(
-                    value: unit.distanceKm == null
-                        ? '— km'
-                        : formatDistanceKilometers(unit.distanceKm!),
-                    label: 'distância',
+                    value: formatStraightLineDistanceValue(straightLineKm),
+                    label: straightLineDistanceMetricLabel,
                   ),
                   MetricColumn(
                     value: '${unit.carRoute?.durationMinutes ?? '—'} min',
@@ -821,12 +888,14 @@ class _MapUnitSummary extends StatelessWidget {
 class _UnitListCard extends StatelessWidget {
   const _UnitListCard({
     required this.unit,
+    required this.straightLineKm,
     required this.selected,
     required this.onSelect,
     required this.onDetails,
   });
 
   final HealthUnit unit;
+  final double? straightLineKm;
   final bool selected;
   final VoidCallback onSelect;
   final VoidCallback onDetails;
@@ -886,10 +955,8 @@ class _UnitListCard extends StatelessWidget {
                       label: 'espera',
                     ),
                     MetricColumn(
-                      value: unit.distanceKm == null
-                          ? '— km'
-                          : formatDistanceKilometers(unit.distanceKm!),
-                      label: 'distância',
+                      value: formatStraightLineDistanceValue(straightLineKm),
+                      label: straightLineDistanceMetricLabel,
                       alignment: CrossAxisAlignment.center,
                     ),
                     MetricColumn(
@@ -911,6 +978,7 @@ class _UnitListCard extends StatelessWidget {
 class _ComparisonCard extends StatelessWidget {
   const _ComparisonCard({
     required this.unit,
+    required this.straightLineKm,
     required this.mode,
     required this.selected,
     required this.onSelect,
@@ -918,6 +986,7 @@ class _ComparisonCard extends StatelessWidget {
   });
 
   final HealthUnit unit;
+  final double? straightLineKm;
   final TravelMode mode;
   final bool selected;
   final VoidCallback onSelect;
@@ -985,10 +1054,8 @@ class _ComparisonCard extends StatelessWidget {
                       compact: true,
                     ),
                     MetricColumn(
-                      value: unit.distanceKm == null
-                          ? 'Indisponível'
-                          : formatDistanceKilometers(unit.distanceKm!),
-                      label: 'distância',
+                      value: formatStraightLineDistanceValue(straightLineKm),
+                      label: straightLineDistanceMetricLabel,
                       alignment: CrossAxisAlignment.end,
                       compact: true,
                     ),

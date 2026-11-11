@@ -31,7 +31,8 @@ lib/
 ├── services/
 │   ├── api_config.dart       URL base (--dart-define) e timeout
 │   ├── location_access.dart  acesso à localização do dispositivo
-│   └── location_onboarding_store.dart  lembra a primeira aceitação
+│   ├── location_onboarding_store.dart  lembra a primeira aceitação
+│   └── straight_line_distance.dart  distância geográfica local (linha reta)
 ├── widgets/
 │   └── unit_ui.dart          indicadores, métricas e aviso ilustrativo
 └── theme/
@@ -61,7 +62,7 @@ O aviso ilustrativo só aparece quando a unidade ou a leitura vêm com `is_demo:
 
 ### Localização, distâncias e rotas
 
-A localização do aparelho define a origem da rota de carro. `RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`, converte a `geometry` GeoJSON (`[longitude, latitude]`) para `LatLng`, desenha a polyline no `flutter_map` e enquadra origem, destino e percurso. Distância e duração vêm somente da API; não há trajetos ilustrativos nem simulação. O campo `provider` da resposta é exibido para suportar provedores futuros. Transporte público permanece indisponível (sem rota fictícia). Na descoberta de unidades, `distanceKm` e `carRoute` no modelo ainda ficam nulos — a lista e a comparação mostram “—”/“Indisponível” até haver um contrato de pré-cálculo em lote; o detalhe operacional da unidade selecionada continua vindo de `/units/`.
+A localização do aparelho define a origem da rota de carro. `RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`, converte a `geometry` GeoJSON (`[longitude, latitude]`) para `LatLng`, desenha a polyline no `flutter_map` e enquadra origem, destino e percurso. Distância e duração vêm somente da API; não há trajetos ilustrativos nem simulação. O campo `provider` da resposta é exibido para suportar provedores futuros. Transporte público permanece indisponível (sem rota fictícia). Na descoberta de unidades, a aba Lista e a aba Comparar calculam localmente a **distância aproximada (linha reta)** com `Geolocator.distanceBetween()` a partir da posição do aparelho e das coordenadas da API, com rótulo explícito para não confundir com o percurso de carro (OSRM) na tela de rota. A ordenação **Proximidade** usa essa distância; unidades sem coordenadas válidas ou sem GPS ficam com “Distância indisponível” e por último nessa ordenação. O cartão de resumo do mapa e a tela de detalhes usam o mesmo cálculo e rótulo de linha reta, passando o valor já obtido do cache de `MapScreen` para evitar recálculo. O campo `distanceKm` e `carRoute` no modelo continuam reservados a integrações futuras de pré-cálculo em lote; o detalhe operacional da unidade selecionada continua vindo de `/units/`.
 
 ### Rede em desenvolvimento
 

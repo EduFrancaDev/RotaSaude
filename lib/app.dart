@@ -153,20 +153,37 @@ class _ReturningMap extends StatefulWidget {
   State<_ReturningMap> createState() => _ReturningMapState();
 }
 
-class _ReturningMapState extends State<_ReturningMap> {
+class _ReturningMapState extends State<_ReturningMap>
+    with WidgetsBindingObserver {
   late Future<Position> _position;
 
   @override
   void initState() {
     super.initState();
-    _position = widget.locationAccess.getCurrentPosition();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshPosition();
   }
 
-  void _retryPosition() {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshPosition();
+    }
+  }
+
+  void _refreshPosition() {
     setState(() {
       _position = widget.locationAccess.getCurrentPosition();
     });
   }
+
+  void _retryPosition() => _refreshPosition();
 
   @override
   Widget build(BuildContext context) {

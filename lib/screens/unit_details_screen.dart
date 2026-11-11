@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
 
 class UnitDetailsScreen extends StatelessWidget {
   const UnitDetailsScreen({
     required this.unit,
+    required this.straightLineKm,
     required this.onRoute,
     super.key,
   });
 
   final HealthUnit unit;
+
+  /// Distância geográfica já calculada a partir da posição do aparelho.
+  final double? straightLineKm;
   final ValueChanged<TravelMode>? onRoute;
 
   @override
@@ -45,9 +50,11 @@ class UnitDetailsScreen extends StatelessWidget {
               style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
             ),
             const SizedBox(height: 18),
-            if (operational == null)
-              _UnavailableDataCard(unit: unit)
-            else ...[
+            if (operational == null) ...[
+              _UnavailableDataCard(unit: unit),
+              const SizedBox(height: 14),
+              _StraightLineDistanceCard(straightLineKm: straightLineKm),
+            ] else ...[
               UnitAvailabilityStatus(unit: unit),
               if (unit.isDemo) ...[
                 const SizedBox(height: 8),
@@ -73,10 +80,10 @@ class UnitDetailsScreen extends StatelessWidget {
                             alignment: CrossAxisAlignment.center,
                           ),
                           MetricColumn(
-                            value: unit.distanceKm == null
-                                ? '— km'
-                                : formatDistanceKilometers(unit.distanceKm!),
-                            label: 'de você',
+                            value: formatStraightLineDistanceValue(
+                              straightLineKm,
+                            ),
+                            label: straightLineDistanceMetricLabel,
                             alignment: CrossAxisAlignment.end,
                           ),
                         ],
@@ -172,6 +179,30 @@ class UnitDetailsScreen extends StatelessWidget {
                 child: const Text('Ver opções de rota'),
               ),
             ),
+    );
+  }
+}
+
+class _StraightLineDistanceCard extends StatelessWidget {
+  const _StraightLineDistanceCard({required this.straightLineKm});
+
+  final double? straightLineKm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card.outlined(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            MetricColumn(
+              value: formatStraightLineDistanceValue(straightLineKm),
+              label: straightLineDistanceMetricLabel,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
