@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Este repositório implementa somente o aplicativo Flutter/Dart. Sistemas das unidades, API, banco de dados e cálculo do indicador pertencem a integrações externas. O app consome a API Django de leitura (`/api/v1/units/`, `/api/v1/units/{id}/` e `/api/v1/services/`), mas não implementa o backend nem usa a API de ingestão, exclusiva dos estabelecimentos.
+Este repositório implementa somente o aplicativo Flutter/Dart. Sistemas das unidades, API, banco de dados e cálculo do indicador pertencem a integrações externas. O app consome a API Django de leitura (`/api/v1/units/`, `/api/v1/units/{id}/`, `/api/v1/services/` e `/api/v1/routes/`), mas não implementa o backend nem usa a API de ingestão, exclusiva dos estabelecimentos.
 
 O projeto foi criado com Flutter 3.47.5 e Dart 3.13.4 para **Android e iOS**. O identificador de pacote é `com.edufrancadev.rotasaude`. No Linux, é possível desenvolver e executar a versão Android; o build iOS depende de macOS e Xcode.
 
@@ -18,13 +18,16 @@ lib/
 │   ├── map_screen.dart       exploração em mapa, lista e comparação
 │   ├── location_selection_screen.dart  escolha de área de consulta
 │   ├── unit_details_screen.dart  detalhes e dados indisponíveis da unidade
-│   ├── route_preview_screen.dart  prévias ilustrativas por transporte
+│   ├── route_preview_screen.dart  rota de carro no mapa e estados de falha
 │   └── availability_screen.dart  explicação dos indicadores
 ├── models/
-│   └── health_unit.dart      áreas, unidade, leitura operacional e atualidade dos dados
+│   ├── health_unit.dart      áreas, unidade, leitura operacional e atualidade dos dados
+│   └── driving_route.dart    rota de carro normalizada (distância, duração, polyline)
 ├── repositories/
 │   ├── health_unit_repository.dart  cliente HTTP da API e erros tipados
-│   └── health_unit_parser.dart  JSON da API para o modelo do app
+│   ├── health_unit_parser.dart  JSON da API para o modelo do app
+│   ├── route_repository.dart  cliente HTTP de `/api/v1/routes/`
+│   └── route_parser.dart  GeoJSON LineString → pontos do mapa
 ├── services/
 │   ├── api_config.dart       URL base (--dart-define) e timeout
 │   ├── location_access.dart  acesso à localização do dispositivo
@@ -58,13 +61,13 @@ O aviso ilustrativo só aparece quando a unidade ou a leitura vêm com `is_demo:
 
 ### Localização, distâncias e rotas
 
-A localização do aparelho é mantida como antes. A API não fornece distância nem rota, e o app ainda não tem provedor de roteamento: `distanceKm`, `carRoute` e `busRoute` ficam nulos, as telas mostram “— km”/“Indisponível” e a tela de rota informa que o cálculo não está disponível. Os tempos e trajetos de exemplo das fixtures anteriores foram removidos de `lib/`.
+A localização do aparelho define a origem da rota de carro. `RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`, converte a `geometry` GeoJSON (`[longitude, latitude]`) para `LatLng`, desenha a polyline no `flutter_map` e enquadra origem, destino e percurso. Distância e duração vêm somente da API; não há trajetos ilustrativos nem simulação. O campo `provider` da resposta é exibido para suportar provedores futuros. Transporte público permanece indisponível (sem rota fictícia). Na descoberta de unidades, `distanceKm` e `carRoute` no modelo ainda ficam nulos — a lista e a comparação mostram “—”/“Indisponível” até haver um contrato de pré-cálculo em lote; o detalhe operacional da unidade selecionada continua vindo de `/units/`.
 
 ### Rede em desenvolvimento
 
 O manifesto de debug (`android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
 
-Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. As telas de rota desenham um esquema local marcado como ilustrativo; não calculam trajeto, trânsito ou transporte em tempo real.
+Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. A tela de rota trata carregamento, erro com “Tentar novamente” e permissão de localização ao atualizar a origem.
 
 ## Identidade visual
 
@@ -73,7 +76,7 @@ As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/
 ## Evolução prevista
 
 1. Usar `StatefulWidget` e `setState` para estado local simples. Avaliar outra solução apenas quando o fluxo mostrar uma necessidade concreta.
-2. Implementar roteamento e distância reais somente quando houver provedor e contrato definidos; hoje não há cálculo e o conteúdo de `UnitRoutePreview` só é exibido se alguma fonte o preencher.
+2. Estender distância e tempo de carro às abas Lista e Comparar (hoje só na tela de rota) e evoluir transporte público quando o backend publicar contrato.
 3. Atualizar os dados sem reabrir a tela (puxar para atualizar ou ao voltar ao app) e HTTPS/ATS para produção, quando solicitados.
 
 ## Desenvolvimento no celular

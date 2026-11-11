@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
+import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/screens/availability_screen.dart';
 import 'package:rotasaude/screens/location_selection_screen.dart';
 import 'package:rotasaude/screens/route_preview_screen.dart';
@@ -17,12 +18,20 @@ enum _DiscoveryTab { map, list, compare }
 enum _LoadStatus { loading, loaded, failed }
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({required this.position, this.repository, super.key});
+  const MapScreen({
+    required this.position,
+    this.repository,
+    this.routeRepository,
+    super.key,
+  });
 
   final Position position;
 
   /// Fonte das unidades. Sem ela, usa a API configurada em [ApiConfig].
   final HealthUnitRepository? repository;
+
+  /// Fonte das rotas. Sem ela, usa a API configurada em [ApiConfig].
+  final RouteRepository? routeRepository;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -166,9 +175,15 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _showRoute(HealthUnit unit, TravelMode mode) async {
+    final origin = LatLng(widget.position.latitude, widget.position.longitude);
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => RoutePreviewScreen(unit: unit, initialMode: mode),
+        builder: (_) => RoutePreviewScreen(
+          unit: unit,
+          initialMode: mode,
+          initialOrigin: origin,
+          routeRepository: widget.routeRepository,
+        ),
       ),
     );
   }

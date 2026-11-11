@@ -7,7 +7,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:rotasaude/app.dart';
 import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/repositories/health_unit_parser.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:rotasaude/models/driving_route.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
+import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/location_onboarding_store.dart';
@@ -32,9 +35,12 @@ void main() {
     speedAccuracy: 0,
   );
 
+  FakeRouteRepository fakeRouteRepository() => FakeRouteRepository();
+
   Future<void> openDiscovery(
     WidgetTester tester, {
     HealthUnitRepository? repository,
+    RouteRepository? routeRepository,
   }) async {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -45,6 +51,7 @@ void main() {
         home: MapScreen(
           position: goianiaPosition(),
           repository: repository ?? goianiaRepository(),
+          routeRepository: routeRepository ?? fakeRouteRepository(),
         ),
       ),
     );
@@ -354,7 +361,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('detalhes mostram a unidade e a rota segue indisponível', (
+  testWidgets('detalhes mostram a unidade e a rota de carro calculada', (
     tester,
   ) async {
     await openDiscovery(tester);
@@ -377,13 +384,12 @@ void main() {
     await tester.tap(find.text('Ver opções de rota'));
     await tester.pumpAndSettle();
     expect(find.text('Rota até a unidade'), findsOneWidget);
-    expect(find.text('Rota indisponível'), findsOneWidget);
-    // Tempos e trajetos de exemplo não são reaproveitados.
+    expect(find.text('Calculando rota de carro…'), findsNothing);
+    expect(find.text('3 min'), findsOneWidget);
+    expect(find.text('1,5 km'), findsOneWidget);
+    expect(find.text('Rota calculada por test · modo driving'), findsOneWidget);
+  // Tempos e trajetos de exemplo não são reaproveitados.
     expect(find.text('14 min'), findsNothing);
-
-    await tester.tap(find.text('Ônibus'));
-    await tester.pumpAndSettle();
-    expect(find.text('Rota indisponível'), findsOneWidget);
     expect(find.text('29 min'), findsNothing);
 
     await tester.tap(find.byTooltip('Voltar'));
@@ -492,6 +498,29 @@ void main() {
 }
 
 /// Repositório cuja consulta só termina quando o teste libera.
+class FakeRouteRepository implements RouteRepository {
+  @override
+  Future<DrivingRoute> fetchDrivingRoute({
+    required LatLng origin,
+    required String unitId,
+  }) async {
+    return DrivingRoute(
+      provider: 'test',
+      mode: 'driving',
+      unitId: unitId,
+      distanceMeters: 1500,
+      durationSeconds: 180,
+      polyline: [
+        origin,
+        const LatLng(-16.6862, -49.264),
+      ],
+    );
+  }
+
+  @override
+  void close() {}
+}
+
 class _PendingRepository extends FakeHealthUnitRepository {
   _PendingRepository(this.pending);
 
