@@ -1,6 +1,6 @@
 # RotaSaúde
 
-Aplicativo mobile em Flutter e Dart para ajudar o cidadão a consultar unidades públicas de saúde, comparar informações e planejar o deslocamento. O repositório contém a base do aplicativo para Android e iOS. Backend, banco de dados e infraestrutura ficam fora do escopo deste código.
+Aplicativo mobile em Flutter e Dart para ajudar o cidadão a consultar unidades públicas de saúde, comparar informações e planejar o deslocamento. O repositório contém a base do aplicativo para Android e iOS. O backend MVP (Django, DRF e PostgreSQL) vive de forma independente em `backend/`; veja o [README do backend](backend/README.md).
 
 ## Executar no Android conectado
 
@@ -17,6 +17,7 @@ Durante o `flutter run`, pressione `r` para Hot Reload, `R` para Hot Restart e `
 ## Estrutura e documentação
 
 - [Arquitetura mobile e decisões iniciais](docs/arquitetura-mobile.md)
+- [Backend MVP: execução, endpoints e testes](backend/README.md)
 - [Tecnologias e proposta N1](docs/tecnologias.md)
 - [Identidade visual e arquivos SVG](assets/brand/README.md)
 - [Apresentação visual N1](docs/n1/RotaSaude_N1_apresentacao_visual_final.pdf)

@@ -2,7 +2,7 @@
 
 ## Escopo
 
-Este repositório implementa somente o aplicativo Flutter/Dart. Sistemas das unidades, API, banco de dados e cálculo do indicador pertencem a integrações externas. O app poderá consumir uma API no futuro, mas não implementa o backend.
+O aplicativo Flutter/Dart é independente do backend. Sistemas das unidades e cálculo do indicador pertencem a integrações externas. Desde o MVP do backend, existe uma API REST somente leitura em `backend/` (Django, DRF e PostgreSQL; ver [backend/README.md](../backend/README.md)), que o app ainda **não** consome: as fixtures de `DemoHealthUnits` continuam sendo a fonte de dados do app. O contrato JSON da API foi desenhado a partir de `DemoHealthUnit` (`id` público = `external_id`, `snake_case`, estado operacional nulo quando ausente); distância e rotas não fazem parte dele.
 
 O projeto foi criado com Flutter 3.47.5 e Dart 3.13.4 para **Android e iOS**. O identificador de pacote é `com.edufrancadev.rotasaude`. No Linux, é possível desenvolver e executar a versão Android; o build iOS depende de macOS e Xcode.
 
