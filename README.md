@@ -33,6 +33,7 @@ Durante o `flutter run`, pressione `r` para Hot Reload, `R` para Hot Restart e `
 ## Estrutura e documentação
 
 - [Arquitetura mobile e decisões iniciais](docs/arquitetura-mobile.md)
+- [Backend MVP: execução, endpoints e testes](backend/README.md)
 - [Tecnologias e proposta N1](docs/tecnologias.md)
 - [Identidade visual e arquivos SVG](assets/brand/README.md)
 - [Apresentação visual N1](docs/n1/RotaSaude_N1_apresentacao_visual_final.pdf)
