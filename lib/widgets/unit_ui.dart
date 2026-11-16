@@ -1,9 +1,57 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 
 String formatDistanceKilometers(double distanceKm) =>
     '${distanceKm.toStringAsFixed(1).replaceFirst('.', ',')} km';
+
+String formatUpdateTime(DateTime instant) {
+  final local = instant.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.day)}/${two(local.month)} às '
+      '${two(local.hour)}:${two(local.minute)}';
+}
+
+extension HealthUnitStatusText on HealthUnit {
+  /// Nível exibível: só existe quando a leitura é atual e traz o nível.
+  AvailabilityLevel? get currentAvailability =>
+      currentOperationalData?.availability;
+
+  /// Texto curto do estado operacional, para marcadores e rótulos
+  /// acessíveis. Nunca apresenta dado antigo como atual.
+  String get operationalSummary => operationalSummaryAt(DateTime.now());
+
+  String operationalSummaryAt(DateTime now) =>
+      switch (operationalState(now: now)) {
+        OperationalDataState.current =>
+          currentOperationalDataAt(now)?.availability?.label ??
+              'Disponibilidade não informada',
+        OperationalDataState.stale => 'Dados desatualizados',
+        OperationalDataState.missing => 'Dados operacionais indisponíveis',
+      };
+}
+
+/// Rótulo da coluna de tempo de deslocamento de carro (rota OSRM na tela de rota).
+const carRouteDurationMetricLabel = 'tempo de carro';
+const carRouteDurationUnavailable = 'Indisponível';
+
+/// Indicador de disponibilidade da unidade, ou o motivo de não haver um.
+class UnitAvailabilityStatus extends StatelessWidget {
+  const UnitAvailabilityStatus({required this.unit, this.now, super.key});
+
+  final HealthUnit unit;
+
+  /// Instante de referência para a janela de 30 minutos; `null` usa o relógio do aparelho.
+  final DateTime? now;
+
+  @override
+  Widget build(BuildContext context) {
+    final instant = now ?? DateTime.now();
+    final level = unit.currentOperationalDataAt(instant)?.availability;
+    if (level != null) return AvailabilityPill(level: level);
+    return Text(unit.operationalSummaryAt(instant));
+  }
+}
 
 class AvailabilityPill extends StatelessWidget {
   const AvailabilityPill({required this.level, super.key});
@@ -46,6 +94,8 @@ class AvailabilityPill extends StatelessWidget {
   }
 }
 
+/// Aviso de dado demonstrativo. Só deve ser exibido para unidades ou leituras
+/// marcadas com `is_demo` (ou para conteúdo sempre ilustrativo, como rotas).
 class IllustrativeNotice extends StatelessWidget {
   const IllustrativeNotice({
     super.key,
@@ -124,18 +174,29 @@ class MetricColumn extends StatelessWidget {
       CrossAxisAlignment.end => TextAlign.end,
       _ => TextAlign.start,
     };
+    final valueAlign = switch (alignment) {
+      CrossAxisAlignment.center => Alignment.center,
+      CrossAxisAlignment.end => Alignment.centerRight,
+      _ => Alignment.centerLeft,
+    };
     return Expanded(
       child: Column(
         crossAxisAlignment: alignment,
         children: [
-          Text(
-            value,
-            textAlign: textAlign,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-              fontSize: compact ? 20 : null,
-              fontFeatures: const [FontFeature.tabularFigures()],
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: valueAlign,
+            child: Text(
+              value,
+              maxLines: 1,
+              softWrap: false,
+              textAlign: textAlign,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+                fontSize: compact ? 20 : null,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
           const SizedBox(height: 2),

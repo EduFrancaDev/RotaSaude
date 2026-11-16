@@ -1,21 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
 
 class UnitDetailsScreen extends StatelessWidget {
   const UnitDetailsScreen({
     required this.unit,
+    required this.straightLineKm,
     required this.onRoute,
+    this.operationalNow,
     super.key,
   });
 
-  final DemoHealthUnit unit;
+  final HealthUnit unit;
+
+  /// Distância geográfica já calculada a partir da posição do aparelho.
+  final double? straightLineKm;
   final ValueChanged<TravelMode>? onRoute;
+
+  /// Referência temporal para a janela de 30 minutos; `null` usa o relógio do aparelho.
+  final DateTime? operationalNow;
 
   @override
   Widget build(BuildContext context) {
-    final operational = unit.operationalData;
+    final now = operationalNow ?? DateTime.now();
+    final operational = unit.currentOperationalDataAt(now);
+    final operationalState = unit.operationalState(now: now);
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -45,12 +56,19 @@ class UnitDetailsScreen extends StatelessWidget {
               style: textTheme.bodyMedium?.copyWith(color: AppColors.muted),
             ),
             const SizedBox(height: 18),
-            if (operational == null)
-              const _UnavailableDataCard()
-            else ...[
-              AvailabilityPill(level: operational.availability),
-              const SizedBox(height: 8),
-              const IllustrativeNotice(compact: true),
+            if (operational == null) ...[
+              switch (operationalState) {
+                OperationalDataState.stale => _StaleDataCard(unit: unit),
+                _ => _UnavailableDataCard(unit: unit),
+              },
+              const SizedBox(height: 14),
+              _StraightLineDistanceCard(straightLineKm: straightLineKm),
+            ] else ...[
+              UnitAvailabilityStatus(unit: unit, now: now),
+              if (unit.isDemo) ...[
+                const SizedBox(height: 8),
+                const IllustrativeNotice(compact: true),
+              ],
               const SizedBox(height: 14),
               Card.outlined(
                 color: Colors.white,
@@ -71,17 +89,23 @@ class UnitDetailsScreen extends StatelessWidget {
                             alignment: CrossAxisAlignment.center,
                           ),
                           MetricColumn(
-                            value: unit.distanceKm == null
-                                ? '— km'
-                                : formatDistanceKilometers(unit.distanceKm!),
-                            label: 'de você',
+                            value: formatStraightLineDistanceValue(
+                              straightLineKm,
+                            ),
+                            label: straightLineDistanceMetricLabel,
                             alignment: CrossAxisAlignment.end,
                           ),
                         ],
                       ),
                       const Divider(height: 24),
                       Text(
-                        'A espera é estimada e pode mudar. Os valores desta tela são ilustrativos.',
+                        [
+                          'A espera é estimada e pode mudar.',
+                          if (unit.isDemo)
+                            'Os valores desta tela são ilustrativos.'
+                          else if (operational.updatedAt case final updatedAt?)
+                            'Atualizado em ${formatUpdateTime(updatedAt)}.',
+                        ].join(' '),
                         style: textTheme.bodySmall?.copyWith(
                           color: AppColors.muted,
                           height: 1.35,
@@ -121,7 +145,7 @@ class UnitDetailsScreen extends StatelessWidget {
                 ),
               ),
             ],
-            if (operational != null) ...[
+            if (unit.openingHours != null || unit.phone != null) ...[
               const SizedBox(height: 18),
               Card.outlined(
                 color: Colors.white,
@@ -168,8 +192,86 @@ class UnitDetailsScreen extends StatelessWidget {
   }
 }
 
+class _StraightLineDistanceCard extends StatelessWidget {
+  const _StraightLineDistanceCard({required this.straightLineKm});
+
+  final double? straightLineKm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card.outlined(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            MetricColumn(
+              value: formatStraightLineDistanceValue(straightLineKm),
+              label: straightLineDistanceMetricLabel,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StaleDataCard extends StatelessWidget {
+  const _StaleDataCard({required this.unit});
+
+  final HealthUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card.outlined(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const CircleAvatar(
+              backgroundColor: AppColors.background,
+              child: Icon(Icons.history, color: AppColors.muted),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Dados desatualizados',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: AppColors.navy,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'A última leitura desta unidade passou da janela de atualização. '
+              'Não mostramos espera ou disponibilidade antigas como se fossem atuais.',
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: AppColors.muted, height: 1.4),
+            ),
+            if (unit.operationalData?.updatedAt case final updatedAt?) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Última atualização recebida: ${formatUpdateTime(updatedAt)}.',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.muted),
+              ),
+            ],
+            if (unit.isDemo) ...[
+              const SizedBox(height: 12),
+              const IllustrativeNotice(compact: true),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _UnavailableDataCard extends StatelessWidget {
-  const _UnavailableDataCard();
+  const _UnavailableDataCard({required this.unit});
+
+  final HealthUnit unit;
 
   @override
   Widget build(BuildContext context) {
@@ -186,7 +288,7 @@ class _UnavailableDataCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'Dados temporariamente indisponíveis',
+              'Dados operacionais indisponíveis',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 color: AppColors.navy,
                 fontWeight: FontWeight.w700,
@@ -194,12 +296,23 @@ class _UnavailableDataCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Esta unidade não enviou informações recentes. Não mostramos espera ou disponibilidade antigas como se fossem atuais.',
+              'Esta unidade ainda não enviou leituras operacionais utilizáveis. '
+              'Não inferimos espera nem disponibilidade.',
               style: Theme.of(context).textTheme.bodyMedium
                   ?.copyWith(color: AppColors.muted, height: 1.4),
             ),
-            const SizedBox(height: 12),
-            const IllustrativeNotice(compact: true),
+            if (unit.operationalData?.updatedAt case final updatedAt?) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Última atualização recebida: ${formatUpdateTime(updatedAt)}.',
+                style: Theme.of(context).textTheme.bodySmall
+                    ?.copyWith(color: AppColors.muted),
+              ),
+            ],
+            if (unit.isDemo) ...[
+              const SizedBox(height: 12),
+              const IllustrativeNotice(compact: true),
+            ],
           ],
         ),
       ),

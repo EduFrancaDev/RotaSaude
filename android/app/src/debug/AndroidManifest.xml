@@ -4,4 +4,7 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Somente em debug: permite consultar o Django local por HTTP (adb reverse,
+         10.0.2.2 ou IP da rede). Builds de release continuam exigindo HTTPS. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>

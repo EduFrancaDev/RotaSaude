@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:rotasaude/models/demo_health_unit.dart';
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
 
@@ -51,7 +51,7 @@ class AvailabilityScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'As cores não representam classificação clínica de pacientes nem substituem a triagem profissional. Os dados deste protótipo são ilustrativos.',
+                'As cores não representam classificação clínica de pacientes nem substituem a triagem profissional. Dados marcados como ilustrativos são demonstrativos e não representam a situação atual da unidade.',
                 style: textTheme.bodyMedium?.copyWith(
                   color: AppColors.navy,
                   height: 1.4,
