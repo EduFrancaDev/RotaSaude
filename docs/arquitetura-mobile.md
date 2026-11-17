@@ -14,7 +14,7 @@ mobile/lib/
 ├── app.dart                  MaterialApp e configuração principal
 ├── screens/
 │   ├── home_screen.dart      primeira entrada e estados da localização
-│   ├── location_required_screen.dart  bloqueio se a localização for desligada
+│   ├── origin_selection_screen.dart  definição de origem por GPS ou ponto manual
 │   ├── map_screen.dart       estado, consultas e navegação da descoberta
 │   ├── discovery/            abas Mapa, Lista e Comparar e fluxo de localização
 │   ├── location_selection_screen.dart  escolha de área de consulta
@@ -34,9 +34,10 @@ mobile/lib/
 ├── services/
 │   ├── api_config.dart       URL base (--dart-define) e timeout
 │   ├── location_access.dart  acesso à localização do dispositivo
-│   ├── location_onboarding_store.dart  lembra a primeira aceitação
+│   ├── location_onboarding_store.dart  guarda a primeira entrada e a cidade escolhida
 │   ├── user_location_session_store.dart  persiste origem manual ou modo GPS
-│   └── straight_line_distance.dart  distância geográfica local (linha reta)
+│   ├── straight_line_distance.dart  distância geográfica local (linha reta)
+│   └── external_maps.dart   abertura do destino no app de mapas
 ├── widgets/
 │   └── unit_ui.dart          indicadores, métricas e aviso ilustrativo
 └── theme/
@@ -46,19 +47,19 @@ mobile/lib/
 
 `main.dart` equivale ao ponto de entrada da aplicação. `RotaSaudeApp` é o widget raiz, semelhante ao componente raiz de um app React Native. `HomeScreen` é uma tela composta por widgets Flutter. O `ThemeData` centraliza cores e estilos compartilhados, em vez de espalhar valores por todas as telas.
 
-A tela inicial aparece só na primeira entrada e pede a localização após o toque no botão. Quando a pessoa aceita e o mapa abre, essa escolha fica gravada com `shared_preferences`. Nas próximas aberturas o app vai direto ao mapa. Se a permissão for desligada ou o serviço de localização estiver desativado, `LocationRequiredScreen` cobre qualquer tela até o acesso voltar. `DiscoveryLocationScreen` restaura a origem manual ou obtém a posição do GPS na entrada e, ao retomar o app, consulta o GPS em segundo plano sem desmontar `MapScreen`; em falha mantém a última posição e exibe aviso discreto. `HomeScreen` verifica permissão e serviço separadamente, trata negação, bloqueio, serviço desligado e falha de posição e reavalia os estados ao voltar dos ajustes. `LocationAccess` isola o plugin `geolocator` para testar o fluxo sem depender do aparelho. A permissão solicitada é apenas de uso em primeiro plano. A entrada no mapa usa uma revelação circular a partir do botão, omitida quando o sistema pede redução de movimento.
+A entrada oferece duas ações. **Usar minha localização** solicita permissão de primeiro plano e sugere uma cidade pela posição. **Escolher cidade** abre a Lista sem solicitar GPS. A cidade escolhida fica salva separadamente da origem no `shared_preferences`. Sessões anteriores que já haviam escolhido GPS ainda tentam restaurar a posição, sem interpor um bloqueio se ela estiver indisponível. A descoberta continua acessível ao perder a permissão ou desligar o serviço. Ao retomar o app, a atualização do GPS acontece em segundo plano. Se a leitura falhar, o app sinaliza que está usando a última posição conhecida.
 
-`MapScreen` mantém a área consultada, unidade selecionada, busca, filtro, ordenação, meio de transporte e a aba ativa. `DiscoveryMapTab`, `DiscoveryListTab` e `DiscoveryComparisonTab` recebem os dados filtrados e enviam as ações de volta a `MapScreen`. O mapa usa `flutter_map` e blocos do OpenStreetMap, com atribuição visível. As unidades vêm de um `HealthUnitRepository` (a API por padrão; os testes injetam um simulado) e são consultadas por `?city=` da área escolhida, sempre que a área muda. `UserLocationOrigin` diferencia GPS do aparelho de um ponto confirmado em `ManualLocationPickerScreen`; distâncias em linha reta e rotas OSRM usam essa origem. Com origem manual ativa, o app não exige permissão de GPS nem cobre o fluxo com `LocationRequiredScreen`. A escolha de cidade manual (`LocationSelectionScreen`) altera só a consulta `?city=` e é independente da origem geográfica.
+`MapScreen` controla a cidade consultada, a busca, o filtro, a ordenação e até dois IDs de comparação. A seleção de um marcador é independente desses IDs. Trocar de cidade abre a Lista e mantém o ponto de partida. Cada aba guarda o enquadramento ou a rolagem enquanto a cidade é a mesma. O mapa usa `flutter_map` e OpenStreetMap. O pino central do seletor manual indica o ponto de partida. A integração atual não entrega bairro ou endereço para esse ponto.
 
 ### Integração com a API
 
 `ApiHealthUnitRepository` usa o pacote `http` (já presente como dependência transitiva do `flutter_map`; declarado porque o app passou a usá-lo diretamente e porque oferece `Client` injetável e `MockClient` para testes). A URL base vem de `--dart-define=API_BASE_URL=...`; não há credenciais no app. Cada requisição tem timeout de 10 s. A paginação (`results`/`next`) é seguida até o fim, reaplicando cada `next` ao host configurado, porque o Django o monta com o `Host` da requisição, que pode ser um proxy ou túnel; há limite de páginas e detecção de ciclo. O corpo é decodificado como UTF-8, pois o DRF não declara charset. Falhas viram `HealthApiException` com `kind`: `connection`, `timeout`, `client` (4xx), `server` (5xx) ou `invalidResponse` (JSON inválido ou campo obrigatório ausente; o app não completa dados faltantes). `fetchUnit` e `fetchServices` estão implementados e testados, mas as telas ainda não os usam: a lista já traz o mesmo detalhe e o filtro de atendimento deriva das unidades carregadas.
 
-`MapScreen` trata carregamento, falha (com “Tentar novamente” e mensagem por tipo de erro), lista vazia da API e lista vazia por filtro. Resultados de consultas substituídas por uma troca de área são descartados.
+`MapScreen` trata carregamento, falha (com “Tentar novamente” e mensagem por tipo de erro), cidade sem unidades, busca sem correspondência e filtro sem resultados. Resultados de consultas substituídas por uma troca de área são descartados.
 
 ### Atualidade dos dados operacionais
 
-A API não define validade, então o app aplica uma janela (`operationalDataMaxAge`, 30 min; ajustável com `--dart-define=OPERATIONAL_MAX_AGE_MINUTES=...`). `HealthUnit.operationalState()` devolve `current`, `stale` (antiga, no futuro além de 5 min de tolerância, ou sem data válida) ou `missing` (sem leitura ou com todos os campos nulos). Somente `current` alimenta indicadores, espera, ordenação e marcadores; `stale` mostra “Dados desatualizados” e, nos detalhes, a hora da última atualização; `missing` mostra “Dados operacionais indisponíveis”. A idade é calculada com o relógio do aparelho. `MapScreen` dispara `setState` a cada minuto para reavaliar a janela sem consultar o backend.
+A API não define validade, então o app aplica uma janela (`operationalDataMaxAge`, 30 min; ajustável com `--dart-define=OPERATIONAL_MAX_AGE_MINUTES=...`). `HealthUnit.operationalState()` devolve `current`, `stale` (antiga, no futuro além de 5 min de tolerância, ou sem data válida) ou `missing` (sem leitura ou com todos os campos nulos). Somente `current` alimenta indicadores, espera, ordenação e marcadores; Ao vencer, a espera passa a “Espera sem atualização”; detalhes, comparação e rota mostram a hora da última leitura quando disponível. Quando falta uma estimativa em uma leitura atual ou a unidade não tem leitura, o app exibe “Espera sem estimativa”. A idade é calculada com o relógio do aparelho. `MapScreen` dispara `setState` a cada minuto para reavaliar a janela sem consultar o backend.
 
 ### Dados demonstrativos
 
@@ -66,13 +67,15 @@ O aviso ilustrativo só aparece quando a unidade ou a leitura vêm com `is_demo:
 
 ### Localização, distâncias e rotas
 
-A origem ativa (`UserLocationOrigin`, GPS ou manual) define o ponto de partida da rota de carro. `RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`, converte a `geometry` GeoJSON (`[longitude, latitude]`) para `LatLng`, desenha a polyline no `flutter_map` e enquadra origem, destino e percurso. Distância e duração vêm somente da API; não há trajetos ilustrativos nem simulação. O campo `provider` da resposta é exibido para suportar provedores futuros. Transporte público permanece indisponível (sem rota fictícia). Na descoberta de unidades, a aba Lista e a aba Comparar calculam localmente a **distância aproximada (linha reta)** com `Geolocator.distanceBetween()` a partir da posição do aparelho e das coordenadas da API, com rótulo explícito para não confundir com o percurso de carro (OSRM) na tela de rota. A ordenação **Proximidade** usa essa distância; unidades sem coordenadas válidas ou sem GPS ficam com “Distância indisponível” e por último nessa ordenação. O cartão de resumo do mapa e a tela de detalhes usam o mesmo cálculo e rótulo de linha reta, passando o valor já obtido do cache de `MapScreen` para evitar recálculo. O campo `distanceKm` e `carRoute` no modelo continuam reservados a integrações futuras de pré-cálculo em lote; o detalhe operacional da unidade selecionada continua vindo de `/units/`.
+O GPS e o ponto confirmado no mapa são origens opcionais. O app pede origem para ordenar por proximidade ou calcular deslocamentos. A distância em linha reta é calculada localmente por `Geolocator.distanceBetween()` e rotulada separadamente do trajeto. A ordenação por espera coloca estimativas atuais primeiro.
+
+`RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`. Exibe o destino durante carregamento e falhas e mantém o endereço selecionável. O trajeto e a duração vêm do OSRM. A comparação consulta as unidades selecionadas em sequência, respeitando o intervalo padrão do provedor, e reaproveita os tempos calculados para a origem atual também nos cards. O provedor não entrega rotas de ônibus. A abertura externa usa o plugin Flutter `url_launcher` para repassar coordenadas ou endereço ao sistema. Se o sistema não abrir um aplicativo externo, o endereço permanece acessível.
 
 ### Rede em desenvolvimento
 
 O manifesto de debug (`mobile/android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
 
-Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. A tela de rota trata carregamento, erro com “Tentar novamente” e permissão de localização ao atualizar a origem.
+O cadastro lista os serviços da unidade. O backend não informa disponibilidade atual por serviço e aceita o nível de disponibilidade operacional enviado pela integração sem definir limites ou fórmula por nível. A legenda explica o indicador com essa distinção. Uma unidade pode ter rota mesmo sem leitura operacional.
 
 ## Identidade visual
 
@@ -81,7 +84,7 @@ As cores usadas em `AppColors` seguem o [JPG de referência da marca](../mobile/
 ## Evolução prevista
 
 1. Usar `StatefulWidget` e `setState` para estado local simples. Avaliar outra solução apenas quando o fluxo mostrar uma necessidade concreta.
-2. Estender distância e tempo de carro às abas Lista e Comparar (hoje só na tela de rota) e evoluir transporte público quando o backend publicar contrato.
+2. Evoluir transporte público e endereços de pontos manuais quando houver integrações que entreguem esses dados.
 3. Atualizar os dados sem reabrir a tela (puxar para atualizar ou ao voltar ao app) e HTTPS/ATS para produção, quando solicitados.
 
 ## Desenvolvimento no celular
