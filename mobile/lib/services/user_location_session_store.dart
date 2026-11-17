@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Mantém a origem escolhida entre navegação e retorno do segundo plano.
 abstract class UserLocationSessionStore {
   Future<UserLocationOrigin?> load();
+  Future<bool> usesGps();
   Future<void> save(UserLocationOrigin origin);
   Future<void> clear();
 }
@@ -18,6 +19,12 @@ class SharedUserLocationSessionStore implements UserLocationSessionStore {
 
   static const _kindManual = 'manual';
   static const _kindGps = 'gps';
+
+  @override
+  Future<bool> usesGps() async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getString(_kindKey) == _kindGps;
+  }
 
   @override
   Future<UserLocationOrigin?> load() async {
@@ -62,6 +69,9 @@ class MemoryUserLocationSessionStore implements UserLocationSessionStore {
   MemoryUserLocationSessionStore({this._origin});
 
   UserLocationOrigin? _origin;
+
+  @override
+  Future<bool> usesGps() async => _origin?.isDeviceGps ?? false;
 
   @override
   Future<UserLocationOrigin?> load() async => _origin;
