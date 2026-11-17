@@ -31,4 +31,4 @@ A versão **colorida original** mantém o azul no corpo do símbolo, o verde ág
 | Ícone e nome, sem slogan | [SVG](svg/icone-nome/colorida-original.svg) | [SVG](svg/icone-nome/colorida-cores-secundarias.svg) | [SVG](svg/icone-nome/preto.svg) | [SVG](svg/icone-nome/branco.svg) | [SVG](svg/icone-nome/azul.svg) | [SVG](svg/icone-nome/verde.svg) |
 | Somente slogan | [SVG](svg/somente-slogan/colorida-original.svg) | [SVG](svg/somente-slogan/colorida-cores-secundarias.svg) | [SVG](svg/somente-slogan/preto.svg) | [SVG](svg/somente-slogan/branco.svg) | [SVG](svg/somente-slogan/azul.svg) | [SVG](svg/somente-slogan/verde.svg) |
 
-Para refazer os arquivos a partir do SVG preto, execute `python3 assets/brand/gerar_svg.py` na raiz do projeto. O gerador usa Inkscape para separar os caminhos do ícone.
+Para refazer os arquivos a partir do SVG preto, execute `python3 assets/brand/gerar_svg.py` dentro de `mobile/`. O gerador usa Inkscape para separar os caminhos do ícone.

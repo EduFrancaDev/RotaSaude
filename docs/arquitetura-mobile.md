@@ -1,21 +1,22 @@
-# Arquitetura inicial do aplicativo
+# Arquitetura do aplicativo Flutter
 
 ## Escopo
 
-Este repositório implementa somente o aplicativo Flutter/Dart. Sistemas das unidades, API, banco de dados e cálculo do indicador pertencem a integrações externas. O app consome a API Django de leitura (`/api/v1/units/`, `/api/v1/units/{id}/`, `/api/v1/services/` e `/api/v1/routes/`), mas não implementa o backend nem usa a API de ingestão, exclusiva dos estabelecimentos.
+O monorepo reúne o aplicativo Flutter/Dart em [`mobile/`](../mobile/) e a API Django em [`backend/`](../backend/). O app usa os endpoints de leitura (`/api/v1/units/`, `/api/v1/units/{id}/`, `/api/v1/services/` e `/api/v1/routes/`). Os sistemas dos estabelecimentos enviam suas leituras operacionais para a API de ingestão do backend.
 
 O projeto foi criado com Flutter 3.47.5 e Dart 3.13.4 para **Android e iOS**. O identificador de pacote é `com.edufrancadev.rotasaude`. No Linux, é possível desenvolver e executar a versão Android; o build iOS depende de macOS e Xcode.
 
 ## Código atual
 
 ```text
-lib/
+mobile/lib/
 ├── main.dart                 entrada do processo e runApp
 ├── app.dart                  MaterialApp e configuração principal
 ├── screens/
 │   ├── home_screen.dart      primeira entrada e estados da localização
 │   ├── location_required_screen.dart  bloqueio se a localização for desligada
-│   ├── map_screen.dart       exploração em mapa, lista e comparação
+│   ├── map_screen.dart       estado, consultas e navegação da descoberta
+│   ├── discovery/            abas Mapa, Lista e Comparar e fluxo de localização
 │   ├── location_selection_screen.dart  escolha de área de consulta
 │   ├── manual_location_picker_screen.dart  ponto no mapa sem GPS
 │   ├── unit_details_screen.dart  detalhes e dados indisponíveis da unidade
@@ -45,9 +46,9 @@ lib/
 
 `main.dart` equivale ao ponto de entrada da aplicação. `RotaSaudeApp` é o widget raiz, semelhante ao componente raiz de um app React Native. `HomeScreen` é uma tela composta por widgets Flutter. O `ThemeData` centraliza cores e estilos compartilhados, em vez de espalhar valores por todas as telas.
 
-A tela inicial aparece só na primeira entrada e pede a localização após o toque no botão. Quando a pessoa aceita e o mapa abre, essa escolha fica gravada com `shared_preferences`. Nas próximas aberturas o app vai direto ao mapa. Se a permissão for desligada ou o serviço de localização estiver desativado, `LocationRequiredScreen` cobre qualquer tela até o acesso voltar. `_ReturningMap` obtém a posição na entrada e, ao retomar o app, consulta o GPS em segundo plano sem desmontar `MapScreen`; em falha mantém a última posição e exibe aviso discreto. `HomeScreen` verifica permissão e serviço separadamente, trata negação, bloqueio, serviço desligado e falha de posição e reavalia os estados ao voltar dos ajustes. `LocationAccess` isola o plugin `geolocator` para testar o fluxo sem depender do aparelho. A permissão solicitada é apenas de uso em primeiro plano. A entrada no mapa usa uma revelação circular a partir do botão, omitida quando o sistema pede redução de movimento.
+A tela inicial aparece só na primeira entrada e pede a localização após o toque no botão. Quando a pessoa aceita e o mapa abre, essa escolha fica gravada com `shared_preferences`. Nas próximas aberturas o app vai direto ao mapa. Se a permissão for desligada ou o serviço de localização estiver desativado, `LocationRequiredScreen` cobre qualquer tela até o acesso voltar. `DiscoveryLocationScreen` restaura a origem manual ou obtém a posição do GPS na entrada e, ao retomar o app, consulta o GPS em segundo plano sem desmontar `MapScreen`; em falha mantém a última posição e exibe aviso discreto. `HomeScreen` verifica permissão e serviço separadamente, trata negação, bloqueio, serviço desligado e falha de posição e reavalia os estados ao voltar dos ajustes. `LocationAccess` isola o plugin `geolocator` para testar o fluxo sem depender do aparelho. A permissão solicitada é apenas de uso em primeiro plano. A entrada no mapa usa uma revelação circular a partir do botão, omitida quando o sistema pede redução de movimento.
 
-`MapScreen` mantém a área consultada, unidade selecionada, busca, filtro, ordenação, meio de transporte e as abas Mapa/Lista/Comparar. O mapa usa `flutter_map` e blocos do OpenStreetMap, com atribuição visível. As unidades vêm de um `HealthUnitRepository` (a API por padrão; os testes injetam um simulado) e são consultadas por `?city=` da área escolhida, sempre que a área muda. `UserLocationOrigin` diferencia GPS do aparelho de um ponto confirmado em `ManualLocationPickerScreen`; distâncias em linha reta e rotas OSRM usam essa origem. Com origem manual ativa, o app não exige permissão de GPS nem cobre o fluxo com `LocationRequiredScreen`. A escolha de cidade manual (`LocationSelectionScreen`) altera só a consulta `?city=` e é independente da origem geográfica.
+`MapScreen` mantém a área consultada, unidade selecionada, busca, filtro, ordenação, meio de transporte e a aba ativa. `DiscoveryMapTab`, `DiscoveryListTab` e `DiscoveryComparisonTab` recebem os dados filtrados e enviam as ações de volta a `MapScreen`. O mapa usa `flutter_map` e blocos do OpenStreetMap, com atribuição visível. As unidades vêm de um `HealthUnitRepository` (a API por padrão; os testes injetam um simulado) e são consultadas por `?city=` da área escolhida, sempre que a área muda. `UserLocationOrigin` diferencia GPS do aparelho de um ponto confirmado em `ManualLocationPickerScreen`; distâncias em linha reta e rotas OSRM usam essa origem. Com origem manual ativa, o app não exige permissão de GPS nem cobre o fluxo com `LocationRequiredScreen`. A escolha de cidade manual (`LocationSelectionScreen`) altera só a consulta `?city=` e é independente da origem geográfica.
 
 ### Integração com a API
 
@@ -69,13 +70,13 @@ A origem ativa (`UserLocationOrigin`, GPS ou manual) define o ponto de partida d
 
 ### Rede em desenvolvimento
 
-O manifesto de debug (`android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
+O manifesto de debug (`mobile/android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
 
 Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. A tela de rota trata carregamento, erro com “Tentar novamente” e permissão de localização ao atualizar a origem.
 
 ## Identidade visual
 
-As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../assets/brand/README.md) estão preservados como arquivos vetoriais. A tela inicial desenha a logo com `flutter_svg`, porque o Flutter não renderiza SVG sozinho.
+As cores usadas em `AppColors` seguem o [JPG de referência da marca](../mobile/assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../mobile/assets/brand/README.md) estão preservados como arquivos vetoriais. A tela inicial desenha a logo com `flutter_svg`, porque o Flutter não renderiza SVG sozinho.
 
 ## Evolução prevista
 
@@ -85,9 +86,10 @@ As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/
 
 ## Desenvolvimento no celular
 
-Com o dispositivo Android autorizado na depuração USB:
+Com o dispositivo Android autorizado na depuração USB, execute a partir da raiz do repositório:
 
 ```bash
+cd mobile
 flutter doctor
 flutter devices
 flutter run -d <ID_DO_DISPOSITIVO>
@@ -98,8 +100,8 @@ No terminal do `flutter run`, `r` aplica Hot Reload, `R` reinicia o estado com H
 ## Organização dos materiais
 
 - `docs/n1/`: apresentação e requisitos acadêmicos da N1.
-- `assets/brand/originais/`: JPG de referência e SVG preto de origem.
-- `assets/brand/svg/`: versões vetoriais da marca.
-- `assets/brand/gerar_svg.py`: gerador reproduzível das versões SVG a partir do vetor original.
+- `mobile/assets/brand/originais/`: JPG de referência e SVG preto de origem.
+- `mobile/assets/brand/svg/`: versões vetoriais da marca.
+- `mobile/assets/brand/gerar_svg.py`: gerador reproduzível das versões SVG a partir do vetor original.
 
-O `pubspec.lock` é mantido no repositório para fixar as dependências resolvidas do aplicativo. Artefatos de build, caches e arquivos locais do Android/iOS são ignorados pelo Git.
+O `mobile/pubspec.lock` é mantido no repositório para fixar as dependências resolvidas do aplicativo. Artefatos de build, caches e arquivos locais do Android/iOS são ignorados pelo Git.
