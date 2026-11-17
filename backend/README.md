@@ -1,8 +1,8 @@
 # Backend RotaSaúde (MVP – etapa 1)
 
-API REST em Django + Django REST Framework + PostgreSQL, consumida pelo app Flutter. A API pública é somente leitura; a escrita de leituras operacionais ocorre apenas pela [integração autenticada](#integração-de-estabelecimentos-etapa-2). Não há autenticação de usuários finais, Redis/Celery, WebSockets nem cálculo de indicadores.
+API REST em Django + Django REST Framework + PostgreSQL, consumida pelo [app Flutter](../mobile/). A API pública é somente leitura; a escrita de leituras operacionais ocorre apenas pela [integração autenticada](#integração-de-estabelecimentos-etapa-2). Não há autenticação de usuários finais, Redis/Celery, WebSockets nem cálculo de indicadores.
 
-> **Dados DEMONSTRATIVOS.** O seed cadastra 4 unidades fictícias de Goiânia (espelho de `lib/models/demo_health_unit.dart`). Elas e suas leituras operacionais não são informações oficiais, atuais nem de estabelecimentos reais e vêm marcadas com `is_demo: true`.
+> **Dados DEMONSTRATIVOS.** O seed cadastra quatro unidades fictícias de Goiânia para demonstração no app. Elas e suas leituras operacionais não são informações oficiais, atuais nem de estabelecimentos reais e vêm marcadas com `is_demo: true`.
 
 ## Stack
 
@@ -110,8 +110,8 @@ Notas de contrato para o Flutter:
 
 - `id` é o `external_id`; o UUID interno não é exposto. Os campos usam `snake_case`.
 - `availability_level`: `HIGH`, `MODERATE`, `LOW`, `CRITICAL` ou `null` (equivalentes ao `AvailabilityLevel` do app). Rótulos e cores ficam no app.
-- `services` é uma lista de nomes em ordem alfabética (o app hoje usa a ordem das fixtures).
-- `distanceKm` e as prévias de rota do protótipo não existem na API: dependem da posição do usuário e de um provedor de rotas, ainda não definidos.
+- `services` é uma lista de nomes em ordem alfabética.
+- O app calcula a distância em linha reta no aparelho. O trajeto de carro vem de [`GET /api/v1/routes/`](#rotas-de-carro-osrm).
 - O estado operacional mais recente é o de maior `source_updated_at`; todo o histórico fica no banco.
 
 ## Integração de estabelecimentos (etapa 2)

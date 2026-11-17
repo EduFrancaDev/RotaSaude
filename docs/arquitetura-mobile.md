@@ -1,15 +1,15 @@
-# Arquitetura inicial do aplicativo
+# Arquitetura do aplicativo Flutter
 
 ## Escopo
 
-Este repositório implementa somente o aplicativo Flutter/Dart. Sistemas das unidades, API, banco de dados e cálculo do indicador pertencem a integrações externas. O app consome a API Django de leitura (`/api/v1/units/`, `/api/v1/units/{id}/`, `/api/v1/services/` e `/api/v1/routes/`), mas não implementa o backend nem usa a API de ingestão, exclusiva dos estabelecimentos.
+O monorepo reúne o aplicativo Flutter/Dart em [`mobile/`](../mobile/) e a API Django em [`backend/`](../backend/). O app usa os endpoints de leitura (`/api/v1/units/`, `/api/v1/units/{id}/`, `/api/v1/services/` e `/api/v1/routes/`). Os sistemas dos estabelecimentos enviam suas leituras operacionais para a API de ingestão do backend.
 
 O projeto foi criado com Flutter 3.47.5 e Dart 3.13.4 para **Android e iOS**. O identificador de pacote é `com.edufrancadev.rotasaude`. No Linux, é possível desenvolver e executar a versão Android; o build iOS depende de macOS e Xcode.
 
 ## Código atual
 
 ```text
-lib/
+mobile/lib/
 ├── main.dart                 entrada do processo e runApp
 ├── app.dart                  MaterialApp e configuração principal
 ├── screens/
@@ -69,13 +69,13 @@ A origem ativa (`UserLocationOrigin`, GPS ou manual) define o ponto de partida d
 
 ### Rede em desenvolvimento
 
-O manifesto de debug (`android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
+O manifesto de debug (`mobile/android/app/src/debug/AndroidManifest.xml`) habilita tráfego HTTP em texto claro para falar com o Django local; builds de release continuam exigindo HTTPS. Para iOS, o App Transport Security exigirá exceção ou HTTPS; isso não foi configurado nem verificado.
 
 Os detalhes preservam a unidade de origem e ocultam espera e disponibilidade quando os dados operacionais estão ausentes. `AvailabilityScreen` explica os quatro níveis textuais e a ressalva clínica. A tela de rota trata carregamento, erro com “Tentar novamente” e permissão de localização ao atualizar a origem.
 
 ## Identidade visual
 
-As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../assets/brand/README.md) estão preservados como arquivos vetoriais. A tela inicial desenha a logo com `flutter_svg`, porque o Flutter não renderiza SVG sozinho.
+As cores usadas em `AppColors` seguem o [JPG de referência da marca](../mobile/assets/brand/originais/rota-saude-jpg-colorido-fonte-da-verdade.jpeg): azul `#0D74C8`, verde água `#06A8AB` e azul escuro `#12466A`. Os valores são aproximações obtidas de um JPG comprimido. Os [SVGs da marca](../mobile/assets/brand/README.md) estão preservados como arquivos vetoriais. A tela inicial desenha a logo com `flutter_svg`, porque o Flutter não renderiza SVG sozinho.
 
 ## Evolução prevista
 
@@ -85,9 +85,10 @@ As cores usadas em `AppColors` seguem o [JPG de referência da marca](../assets/
 
 ## Desenvolvimento no celular
 
-Com o dispositivo Android autorizado na depuração USB:
+Com o dispositivo Android autorizado na depuração USB, execute a partir da raiz do repositório:
 
 ```bash
+cd mobile
 flutter doctor
 flutter devices
 flutter run -d <ID_DO_DISPOSITIVO>
@@ -98,8 +99,8 @@ No terminal do `flutter run`, `r` aplica Hot Reload, `R` reinicia o estado com H
 ## Organização dos materiais
 
 - `docs/n1/`: apresentação e requisitos acadêmicos da N1.
-- `assets/brand/originais/`: JPG de referência e SVG preto de origem.
-- `assets/brand/svg/`: versões vetoriais da marca.
-- `assets/brand/gerar_svg.py`: gerador reproduzível das versões SVG a partir do vetor original.
+- `mobile/assets/brand/originais/`: JPG de referência e SVG preto de origem.
+- `mobile/assets/brand/svg/`: versões vetoriais da marca.
+- `mobile/assets/brand/gerar_svg.py`: gerador reproduzível das versões SVG a partir do vetor original.
 
-O `pubspec.lock` é mantido no repositório para fixar as dependências resolvidas do aplicativo. Artefatos de build, caches e arquivos locais do Android/iOS são ignorados pelo Git.
+O `mobile/pubspec.lock` é mantido no repositório para fixar as dependências resolvidas do aplicativo. Artefatos de build, caches e arquivos locais do Android/iOS são ignorados pelo Git.

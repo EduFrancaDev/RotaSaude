@@ -1,8 +1,7 @@
 """Cadastra as unidades DEMONSTRATIVAS de Goiânia usadas pelo protótipo Flutter.
 
-Espelha `lib/models/demo_health_unit.dart` (IDs, nomes, endereços, coordenadas, serviços e
-horários). Todos os dados são fictícios: não representam estabelecimentos reais nem
-informações oficiais ou atuais. O comando é idempotente.
+Os dados fictícios incluem IDs, nomes, endereços, coordenadas, serviços e horários.
+O comando é idempotente.
 """
 
 from django.core.management.base import BaseCommand

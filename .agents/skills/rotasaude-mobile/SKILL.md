@@ -5,25 +5,25 @@ description: Implementar, refatorar ou organizar o aplicativo Flutter/Dart do Ro
 
 # RotaSaúde Mobile
 
-Execute o pedido no escopo do aplicativo Flutter/Dart. Preserve o comportamento existente, as decisões já documentadas e as alterações não commitadas do usuário. Não amplie uma mudança mobile para backend, banco de dados ou infraestrutura.
+Execute o pedido no escopo do aplicativo Flutter/Dart em `mobile/`. Preserve o comportamento existente, as decisões já documentadas e as alterações não commitadas do usuário. Não amplie uma mudança mobile para backend, banco de dados ou infraestrutura.
 
 ## Entenda antes de editar
 
-1. Leia `AGENTS.md` como regras permanentes do repositório; depois consulte `README.md`, `docs/arquitetura-mobile.md`, `pubspec.yaml` e os arquivos afetados. Consulte `docs/tecnologias.md` ou `docs/n1/` somente quando a tarefa depender da proposta ou dos requisitos N1.
-2. Para mudanças visuais, leia `assets/brand/README.md` e use o JPG ali apontado como referência de cor. Preserve os SVGs originais e as variantes existentes.
-3. Confira `git status` e procure implementações relacionadas em `lib/` antes de criar arquivos ou mover código. Trate alterações existentes como trabalho do usuário.
+1. Leia `AGENTS.md` como regras permanentes do repositório; depois consulte `README.md`, `docs/arquitetura-mobile.md`, `mobile/pubspec.yaml` e os arquivos afetados. Consulte `docs/tecnologias.md` ou `docs/n1/` somente quando a tarefa depender da proposta ou dos requisitos N1.
+2. Para mudanças visuais, leia `mobile/assets/brand/README.md` e use o JPG ali apontado como referência de cor. Preserve os SVGs originais e as variantes existentes.
+3. Confira `git status` e procure implementações relacionadas em `mobile/lib/` antes de criar arquivos ou mover código. Trate alterações existentes como trabalho do usuário.
 4. Defina o comportamento solicitado, os estados relevantes e as plataformas afetadas. Em reorganizações, identifique todos os imports, assets, links e comandos que a mudança alcança.
 
 ## Trabalhe com impeccable na interface
 
 - Quando o pedido criar, alterar ou avaliar telas, fluxos, textos de interface, tema ou acessibilidade Flutter, use também a skill `impeccable`. Siga seu fluxo de contexto e o playbook adequado; para a interface do cidadão, use o modo **Operate** e as orientações para plataforma nativa. Em mudanças internas sem efeito na UI, use apenas esta skill.
 - `impeccable` orienta as decisões de UX e o acabamento visual da superfície solicitada. Esta skill e `AGENTS.md` orientam a implementação Flutter, o escopo mobile, as dependências e a validação técnica. Busque qualidade dentro do pedido; não transforme um refinamento em redesenho nem crie camadas, packages ou funcionalidades fora do escopo para aplicar uma sugestão visual.
-- O JPG indicado em `assets/brand/README.md` é a referência da marca, e `docs/arquitetura-mobile.md` registra as decisões técnicas. Se `PRODUCT.md` ou `DESIGN.md` existirem, use-os para contexto de produto e direção visual sem substituir essas referências. Resolva divergências pelo pedido atual e pelas fontes correspondentes, sem duplicar documentação.
+- O JPG indicado em `mobile/assets/brand/README.md` é a referência da marca, e `docs/arquitetura-mobile.md` registra as decisões técnicas. Se `PRODUCT.md` ou `DESIGN.md` existirem, use-os para contexto de produto e direção visual sem substituir essas referências. Resolva divergências pelo pedido atual e pelas fontes correspondentes, sem duplicar documentação.
 - Valide a UI no Android físico quando disponível, seguindo as passagens visuais limitadas de `impeccable` e as verificações Dart/Flutter abaixo. Os comandos `live` e `detect` de `impeccable` são voltados à web e não se aplicam ao código Flutter nativo.
 
 ## Mantenha responsabilidades claras
 
-- `lib/main.dart` inicia o app; `lib/app.dart` configura o widget raiz; `lib/screens/` compõe telas; `lib/theme/` concentra cores e tema.
+- Em `mobile/`, `lib/main.dart` inicia o app, `lib/app.dart` configura o widget raiz, `lib/screens/` compõe telas e `lib/theme/` concentra cores e tema.
 - Crie `models/`, `services/`, `repositories/`, `widgets/` ou pastas por funcionalidade quando houver uma responsabilidade concreta. Não crie camadas vazias para completar uma árvore idealizada nem use `utils/` como destino genérico.
 - Mantenha widgets de apresentação sem acesso direto a rede, persistência ou regras de negócio. Isole esse acesso quando a funcionalidade realmente existir.
 - Prefira `StatefulWidget` e `setState` para estado local simples. Antes de introduzir gerenciamento de estado, navegação complexa ou uma nova arquitetura, demonstre o problema atual e o ganho da mudança.
@@ -38,7 +38,7 @@ Execute o pedido no escopo do aplicativo Flutter/Dart. Preserve o comportamento 
 
 ## Escolha dependências e implemente com cuidado
 
-- Antes de adicionar um package, verifique Flutter/Dart nativo e dependências já instaladas. Se ainda precisar de um package, confira documentação atual e pub.dev, justifique sua função e mantenha `pubspec.yaml` e `pubspec.lock` alinhados.
+- Antes de adicionar um package, verifique Flutter/Dart nativo e dependências já instaladas. Se ainda precisar de um package, confira documentação atual e pub.dev, justifique sua função e mantenha `mobile/pubspec.yaml` e `mobile/pubspec.lock` alinhados.
 - Não adicione mapas, localização, HTTP, persistência ou renderização SVG antecipadamente. Código nativo Android/iOS exige uma necessidade que Flutter ou um plugin adequado não resolva.
 - Para dados assíncronos, trate carregamento, sucesso, vazio, erro e dados desatualizados conforme o fluxo. Não apresente disponibilidade ou espera simulada como informação atual.
 - Preserve áreas seguras, escala de texto, leitura por tecnologias assistivas, alvos de toque adequados e navegação de retorno nas telas afetadas.
@@ -46,5 +46,5 @@ Execute o pedido no escopo do aplicativo Flutter/Dart. Preserve o comportamento 
 ## Valide e entregue
 
 - Faça a menor mudança coerente. Atualize `docs/arquitetura-mobile.md` quando a estrutura ou uma decisão arquitetural mudar; atualize o `README.md` quando comandos de execução mudarem. Não mexa na documentação N1 para refletir detalhes transitórios do código.
-- Execute `dart format --output=none --set-exit-if-changed lib` e `flutter analyze` para mudanças Dart. Rode testes focados quando houver comportamento que justifique teste; para mudanças de UI ou plataforma, confira o fluxo no Android físico quando disponível. Relate verificações que não puder executar, inclusive iOS neste ambiente Linux.
+- Execute `dart format --output=none --set-exit-if-changed lib` e `flutter analyze` em `mobile/` para mudanças Dart. Rode testes focados quando houver comportamento que justifique teste; para mudanças de UI ou plataforma, confira o fluxo no Android físico quando disponível. Relate verificações que não puder executar, inclusive iOS neste ambiente Linux.
 - Ao concluir, informe arquivos alterados, motivo das decisões de organização/reutilização, verificações realizadas e limitações restantes.
