@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
-import 'package:rotasaude/screens/discovery/discovery_empty_results.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
@@ -12,9 +10,11 @@ class DiscoveryMapTab extends StatelessWidget {
   const DiscoveryMapTab({
     required this.area,
     required this.userOrigin,
-    required this.mapController,
+    required this.initialCamera,
+    required this.onMapEvent,
     required this.units,
-    required this.hasUnits,
+    required this.state,
+    required this.carMinutes,
     required this.selectedUnitId,
     required this.summaryUnit,
     required this.straightLineKmByUnitId,
@@ -22,16 +22,16 @@ class DiscoveryMapTab extends StatelessWidget {
     required this.onSelectUnit,
     required this.onDismissSummary,
     required this.onDetails,
-    required this.onChooseArea,
-    required this.onClearFilters,
     super.key,
   });
 
   final SearchArea? area;
-  final UserLocationOrigin userOrigin;
-  final MapController mapController;
+  final UserLocationOrigin? userOrigin;
+  final MapCamera? initialCamera;
+  final MapEventCallback onMapEvent;
   final List<HealthUnit> units;
-  final bool hasUnits;
+  final Widget? state;
+  final Map<String, int> carMinutes;
   final String? selectedUnitId;
   final HealthUnit? summaryUnit;
   final Map<String, double?> straightLineKmByUnitId;
@@ -39,29 +39,23 @@ class DiscoveryMapTab extends StatelessWidget {
   final ValueChanged<String> onSelectUnit;
   final VoidCallback onDismissSummary;
   final ValueChanged<HealthUnit> onDetails;
-  final VoidCallback onChooseArea;
-  final VoidCallback onClearFilters;
 
   @override
   Widget build(BuildContext context) {
-    final coord = userOrigin.coordinate;
+    final origin = userOrigin;
     final summary = summaryUnit;
-    final center = area?.center ?? coord;
-    final withinDemoArea =
-        area?.id == SearchArea.goiania.id &&
-        Geolocator.distanceBetween(
-              coord.latitude,
-              coord.longitude,
-              SearchArea.goiania.center.latitude,
-              SearchArea.goiania.center.longitude,
-            ) <=
-            35000;
+    final center =
+        area?.center ?? origin?.coordinate ?? SearchArea.goiania.center;
 
     return Stack(
       children: [
         FlutterMap(
-          mapController: mapController,
-          options: MapOptions(initialCenter: center, initialZoom: 13),
+          options: MapOptions(
+            initialCenter: initialCamera?.center ?? center,
+            initialZoom: initialCamera?.zoom ?? 13,
+            initialRotation: initialCamera?.rotation ?? 0,
+            onMapEvent: onMapEvent,
+          ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -70,15 +64,15 @@ class DiscoveryMapTab extends StatelessWidget {
             ),
             MarkerLayer(
               markers: [
-                if (withinDemoArea)
+                if (origin != null)
                   Marker(
-                    point: coord,
+                    point: origin.coordinate,
                     width: 52,
                     height: 52,
                     child: Semantics(
-                      label: userOrigin.mapMarkerSemanticsLabel,
+                      label: origin.mapMarkerSemanticsLabel,
                       child: Icon(
-                        userOrigin.isManual
+                        origin.isManual
                             ? Icons.place_rounded
                             : Icons.my_location_rounded,
                         size: 34,
@@ -92,7 +86,7 @@ class DiscoveryMapTab extends StatelessWidget {
                     Marker(
                       point: unit.position,
                       width: 120,
-                      height: 66,
+                      height: 76,
                       alignment: const Alignment(0, 0.36),
                       child: Semantics(
                         excludeSemantics: true,
@@ -112,21 +106,28 @@ class DiscoveryMapTab extends StatelessWidget {
                                   color: Colors.white,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color:
-                                        unit.currentAvailability?.color ??
-                                        AppColors.muted,
-                                    width: 3,
+                                    color: selectedUnitId == unit.id
+                                        ? AppColors.navy
+                                        : (unit
+                                                  .currentOperationalDataAt(now)
+                                                  ?.availability
+                                                  ?.color ??
+                                              AppColors.muted),
+                                    width: selectedUnitId == unit.id ? 4 : 2,
                                   ),
                                 ),
                                 child: SizedBox(
-                                  width: 42,
-                                  height: 42,
+                                  width: selectedUnitId == unit.id ? 52 : 42,
+                                  height: selectedUnitId == unit.id ? 52 : 42,
                                   child: Icon(
                                     Icons.local_hospital_outlined,
                                     color:
-                                        unit.currentAvailability?.color ??
+                                        unit
+                                            .currentOperationalDataAt(now)
+                                            ?.availability
+                                            ?.color ??
                                         AppColors.muted,
-                                    size: 24,
+                                    size: selectedUnitId == unit.id ? 29 : 23,
                                   ),
                                 ),
                               ),
@@ -152,6 +153,8 @@ class DiscoveryMapTab extends StatelessWidget {
                                       fontSize: 10,
                                       fontWeight: FontWeight.w600,
                                     ),
+                                    textScaler: MediaQuery.textScalerOf(context)
+                                        .clamp(maxScaleFactor: 1.4),
                                   ),
                                 ),
                               ),
@@ -185,26 +188,13 @@ class DiscoveryMapTab extends StatelessWidget {
             ),
           ),
         ),
-        if (area == null || units.isEmpty)
+        if (state case final current?)
           Center(
-            child: DiscoveryEmptyResults(
-              title: area == null
-                  ? 'Escolha uma cidade para consultar unidades'
-                  : !hasUnits
-                  ? 'Nenhuma unidade cadastrada nesta área'
-                  : 'Nenhuma unidade encontrada',
-              message: area == null
-                  ? 'O ponto escolhido está fora das áreas com unidades '
-                        'cadastradas.'
-                  : !hasUnits
-                  ? 'Você pode alterar a cidade a qualquer momento.'
-                  : 'Tente outra busca ou limpe os filtros aplicados.',
-              actionLabel: !hasUnits || area == null
-                  ? 'Escolher localização'
-                  : 'Limpar filtros',
-              onAction: !hasUnits || area == null
-                  ? onChooseArea
-                  : onClearFilters,
+            child: Card(
+              color: Colors.white,
+              margin: const EdgeInsets.fromLTRB(14, 34, 14, 12),
+              clipBehavior: Clip.antiAlias,
+              child: current,
             ),
           )
         else if (summary != null)
@@ -220,7 +210,8 @@ class DiscoveryMapTab extends StatelessWidget {
                   onDismissed: onDismissSummary,
                   child: _MapUnitSummary(
                     unit: summary,
-                    operational: summary.currentOperationalDataAt(now),
+                    minutes: carMinutes[summary.id],
+                    onClose: onDismissSummary,
                     straightLineKm: straightLineKmByUnitId[summary.id],
                     now: now,
                     onDetails: () => onDetails(summary),
@@ -291,84 +282,64 @@ class _DismissibleMapUnitSummaryState
 class _MapUnitSummary extends StatelessWidget {
   const _MapUnitSummary({
     required this.unit,
-    required this.operational,
+    required this.minutes,
     required this.straightLineKm,
     required this.now,
     required this.onDetails,
+    required this.onClose,
   });
 
   final HealthUnit unit;
-  final UnitOperationalData? operational;
+  final int? minutes;
   final double? straightLineKm;
   final DateTime now;
   final VoidCallback onDetails;
+  final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              label: 'Arraste para baixo para ocultar o resumo',
-              container: true,
-              child: Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(2),
+  Widget build(BuildContext context) => Card(
+    margin: const EdgeInsets.all(10),
+    color: Colors.white,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  unit.name,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: AppColors.navy,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ),
-            Text(
-              unit.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            UnitAvailabilityStatus(unit: unit, now: now),
-            if (operational != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  MetricColumn(
-                    value: '${operational!.waitMinutes ?? '—'} min',
-                    label: 'espera',
-                  ),
-                  MetricColumn(
-                    value: formatStraightLineDistanceValue(straightLineKm),
-                    label: straightLineDistanceMetricLabel,
-                  ),
-                  MetricColumn(
-                    value: unit.carRoute?.durationMinutes == null
-                        ? carRouteDurationUnavailable
-                        : '${unit.carRoute!.durationMinutes} min',
-                    label: carRouteDurationMetricLabel,
-                  ),
-                ],
+              IconButton(
+                tooltip: 'Ocultar resumo da unidade',
+                onPressed: onClose,
+                icon: const Icon(Icons.close),
               ),
             ],
+          ),
+          UnitAvailabilityStatus(unit: unit, now: now),
+          const SizedBox(height: 8),
+          UnitWaitEstimate(unit: unit, now: now),
+          if (straightLineKm case final km?)
+            Text('${formatDistanceKilometers(km)} em linha reta')
+          else
+            const Text(straightLineDistanceUnavailable),
+          if (minutes case final value?) Text('$value min de carro'),
+          if (unit.isDemo) ...[
             const SizedBox(height: 8),
-            FilledButton(
-              onPressed: onDetails,
-              child: const Text('Ver detalhes'),
-            ),
+            const IllustrativeNotice(compact: true, short: true),
           ],
-        ),
+          const SizedBox(height: 8),
+          FilledButton(onPressed: onDetails, child: const Text('Ver detalhes')),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }

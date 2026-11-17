@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/services/search_text.dart';
 import 'package:rotasaude/theme/app_colors.dart';
+import 'package:rotasaude/widgets/screen_back_button.dart';
 
 class LocationSelectionScreen extends StatefulWidget {
   const LocationSelectionScreen({super.key, this.currentArea});
@@ -13,9 +15,7 @@ class LocationSelectionScreen extends StatefulWidget {
 }
 
 class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
-  late final TextEditingController _controller = TextEditingController(
-    text: widget.currentArea?.name ?? '',
-  );
+  final _controller = TextEditingController();
   SearchArea? _selected;
 
   @override
@@ -31,10 +31,10 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
   }
 
   List<SearchArea> get _matches {
-    final query = _controller.text.trim().toLowerCase();
+    final query = normalizedSearchText(_controller.text);
     if (query.isEmpty) return SearchArea.suggestions;
     return SearchArea.suggestions
-        .where((area) => area.name.toLowerCase().contains(query))
+        .where((area) => normalizedSearchText(area.name).contains(query))
         .toList(growable: false);
   }
 
@@ -59,12 +59,8 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Escolher localização'),
-        leading: IconButton(
-          tooltip: 'Voltar',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
+        title: const Text('Escolher cidade'),
+        leading: const ScreenBackButton(),
       ),
       body: SafeArea(
         top: false,
@@ -75,7 +71,7 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
                 children: [
                   Text(
-                    'Digite uma cidade ou endereço para ver unidades próximas.',
+                    'Escolha uma cidade atendida pelo RotaSaúde.',
                     style: textTheme.bodyLarge?.copyWith(
                       color: AppColors.muted,
                       height: 1.35,
@@ -91,7 +87,7 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
                       if (suggestions.length == 1) _choose(suggestions.single);
                     },
                     decoration: InputDecoration(
-                      hintText: 'Cidade ou endereço',
+                      labelText: 'Buscar cidade',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _controller.text.isEmpty
                           ? null
@@ -106,51 +102,28 @@ class _LocationSelectionScreenState extends State<LocationSelectionScreen> {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  Text(
-                    'SUGESTÕES',
-                    style: textTheme.labelLarge?.copyWith(
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   if (suggestions.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       child: Text(
-                        'Este local não está disponível no protótipo. Escolha uma das sugestões.',
+                        'Nenhuma cidade encontrada. Edite a busca ou escolha uma das cidades disponíveis abaixo.',
                         style: textTheme.bodyMedium?.copyWith(
                           color: AppColors.muted,
                           height: 1.4,
                         ),
                       ),
-                    )
-                  else
-                    for (final area in suggestions) ...[
-                      _AreaSuggestionTile(
-                        area: area,
-                        selected: _selected?.id == area.id,
-                        onTap: () => _choose(area),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEAF4FA),
-                      borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Text(
-                      'A cidade escolhida altera somente a área de consulta à '
-                      'API. Distâncias e rotas usam a origem (GPS ou ponto '
-                      'manual) definida na entrada do app.',
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColors.navy,
-                        height: 1.4,
-                      ),
+                  for (final area
+                      in suggestions.isEmpty
+                          ? SearchArea.suggestions
+                          : suggestions) ...[
+                    _AreaSuggestionTile(
+                      area: area,
+                      selected: _selected?.id == area.id,
+                      onTap: () => _choose(area),
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                  ],
                 ],
               ),
             ),

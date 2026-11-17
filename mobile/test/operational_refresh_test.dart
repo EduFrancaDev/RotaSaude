@@ -63,12 +63,12 @@ void main() {
     await tester.tap(find.text('Lista'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Alta disponibilidade'), findsOneWidget);
+    expect(find.text('20 min'), findsOneWidget);
 
     now = now.add(const Duration(minutes: 2));
     await tester.pump(const Duration(milliseconds: 60));
 
-    expect(find.text('Alta disponibilidade'), findsNothing);
-    expect(find.text('Dados desatualizados'), findsOneWidget);
+    expect(find.text('20 min'), findsNothing);
+    expect(find.text('Espera sem atualização'), findsOneWidget);
   });
 }

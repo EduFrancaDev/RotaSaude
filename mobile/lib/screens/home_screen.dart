@@ -3,10 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart' hide Path;
+import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
-import 'package:rotasaude/screens/manual_location_picker_screen.dart';
+import 'package:rotasaude/screens/location_selection_screen.dart';
 import 'package:rotasaude/screens/map_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/user_location_session_store.dart';
@@ -21,7 +21,7 @@ class HomeScreen extends StatefulWidget {
     this.locationAccess,
     this.sessionStore,
     this.mapBuilder,
-    this.onLocationAccepted,
+    this.onDiscover,
     this.unitRepository,
   });
 
@@ -29,7 +29,7 @@ class HomeScreen extends StatefulWidget {
   final UserLocationSessionStore? sessionStore;
   final HealthUnitRepository? unitRepository;
   final Widget Function(BuildContext, UserLocationOrigin)? mapBuilder;
-  final VoidCallback? onLocationAccepted;
+  final Future<void> Function(SearchArea?, UserLocationOrigin?)? onDiscover;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -144,8 +144,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       final origin = UserLocationOrigin.fromGps(position);
       await _sessionStore.save(origin);
-      widget.onLocationAccepted?.call();
-      await _openMap(origin);
+      final discover = widget.onDiscover;
+      if (discover != null) {
+        await discover(null, origin);
+      } else {
+        await _openMap(origin);
+      }
       if (mounted) setState(() => _navigating = false);
     } on LocationServiceDisabledException {
       _showIssue(_LocationIssue.serviceOff);
@@ -171,34 +175,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _openManualLocation() async {
-    if (_busy || _navigating || !mounted) return;
-    setState(() => _busy = true);
-    final picked = await Navigator.of(context).push<LatLng>(
-      MaterialPageRoute<LatLng>(
-        fullscreenDialog: true,
-        builder: (_) => const ManualLocationPickerScreen(),
-      ),
+  Future<void> _chooseCity() async {
+    if (_navigating) return;
+    setState(() => _navigating = true);
+    final area = await Navigator.of(context).push<SearchArea>(
+      MaterialPageRoute(builder: (_) => const LocationSelectionScreen()),
     );
     if (!mounted) return;
-    if (picked == null) {
-      setState(() => _busy = false);
-      return;
+    if (area != null) {
+      final discover = widget.onDiscover;
+      if (discover != null) {
+        await discover(area, null);
+      } else {
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => MapScreen(
+              userOrigin: null,
+              initialArea: area,
+              startInList: true,
+              repository: widget.unitRepository,
+              locationAccess: _locationAccess,
+            ),
+          ),
+        );
+      }
     }
-    final origin = UserLocationOrigin.manual(picked);
-    await _sessionStore.save(origin);
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _issue = null;
-    });
-    // Com [onLocationAccepted], o app raiz troca para o mapa principal.
-    if (widget.onLocationAccepted != null) {
-      widget.onLocationAccepted!();
-      return;
-    }
-    setState(() => _navigating = true);
-    await _openMap(origin);
     if (mounted) setState(() => _navigating = false);
   }
 
@@ -407,7 +408,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               OutlinedButton(
                                 onPressed: _busy || _navigating
                                     ? null
-                                    : _openManualLocation,
+                                    : _chooseCity,
                                 style: OutlinedButton.styleFrom(
                                   minimumSize: const Size.fromHeight(52),
                                   foregroundColor: AppColors.blue,
@@ -416,9 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                 ),
-                                child: const Text(
-                                  'Escolher localização manualmente',
-                                ),
+                                child: const Text('Escolher cidade'),
                               ),
                             ],
                           ),

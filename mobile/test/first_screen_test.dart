@@ -309,32 +309,36 @@ void main() {
     expect(find.text('Mapa'), findsOneWidget);
   });
 
-  testWidgets('localização desligada depois da primeira vez bloqueia o app', (
-    tester,
-  ) async {
-    final location = FakeLocationAccess()
-      ..permission = LocationPermission.whileInUse
-      ..serviceEnabled = false;
-    final store = MemoryLocationOnboardingStore(accepted: true);
+  testWidgets(
+    'GPS desligado deixa a pessoa escolher cidade após voltar ao app',
+    (tester) async {
+      final location = FakeLocationAccess()
+        ..permission = LocationPermission.whileInUse
+        ..serviceEnabled = false;
+      final repository = FakeHealthUnitRepository();
+      await tester.pumpWidget(
+        RotaSaudeApp(
+          locationAccess: location,
+          onboardingStore: MemoryLocationOnboardingStore(accepted: true),
+          sessionStore: MemoryUserLocationSessionStore(),
+          unitRepository: repository,
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(
-      RotaSaudeApp(
-        locationAccess: location,
-        onboardingStore: store,
-        sessionStore: MemoryUserLocationSessionStore(),
-        unitRepository: FakeHealthUnitRepository(),
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
+      await tester.tap(find.text('Escolher cidade').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Goiânia, GO'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ver unidades em Goiânia'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Onde você quer buscar atendimento?'), findsNothing);
-    expect(find.text('Ative a localização'), findsOneWidget);
-
-    await tester.tap(find.text('Ativar localização'));
-    await tester.pump();
-    expect(location.locationSettingsCount, 1);
-  });
+      expect(find.text('Unidades de saúde'), findsOneWidget);
+      expect(repository.requestedCities, ['Goiânia']);
+      expect(location.requestCount, 0);
+      expect(location.positionCount, 0);
+    },
+  );
 
   testWidgets('retomar o app mantém o mapa sem tela de carregamento', (
     tester,
@@ -438,20 +442,16 @@ void main() {
     await tester.pump();
 
     expect(find.text('Lista'), findsOneWidget);
-    expect(
-      find.text('Sua localização pode estar desatualizada.'),
-      findsOneWidget,
-    );
+    expect(find.text('Usando a última posição conhecida.'), findsOneWidget);
     expect(find.text('Obtendo localização…'), findsNothing);
   });
 
-  testWidgets('retorno ao app permite tentar novamente após falha de posição', (
+  testWidgets('falha inicial de GPS permite definir origem depois', (
     tester,
   ) async {
     final location = FakeLocationAccess()
       ..permission = LocationPermission.whileInUse
       ..positionError = TimeoutException('sem posição');
-
     await tester.pumpWidget(
       RotaSaudeApp(
         locationAccess: location,
@@ -462,26 +462,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(location.positionCount, 1);
     expect(
-      find.text('Não conseguimos obter sua localização agora.'),
+      find.text('Escolha uma cidade para consultar unidades'),
       findsOneWidget,
     );
-    expect(find.text('Tentar novamente'), findsOneWidget);
-    expect(location.positionCount, 1);
-
-    location
-      ..positionError = null
-      ..pendingPosition = Completer<Position>();
-    await tester.tap(find.text('Tentar novamente'));
-    await tester.pump();
-    expect(find.text('Obtendo localização…'), findsOneWidget);
-    expect(find.text('Tentar novamente'), findsNothing);
-
-    location.pendingPosition!.complete(FakeLocationAccess.testPosition);
+    await tester.tap(find.text('Definir ponto de partida'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Usar minha localização'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tentar novamente'), findsOneWidget);
 
-    expect(find.text('RotaSaúde'), findsOneWidget);
-    expect(location.positionCount, 2);
+    location.positionError = null;
+    await tester.tap(find.text('Tentar novamente'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Saindo de'), findsOneWidget);
+    expect(location.positionCount, 3);
   });
 }
 

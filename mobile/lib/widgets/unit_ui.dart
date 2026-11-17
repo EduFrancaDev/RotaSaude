@@ -31,10 +31,6 @@ extension HealthUnitStatusText on HealthUnit {
       };
 }
 
-/// Rótulo da coluna de tempo de deslocamento de carro (rota OSRM na tela de rota).
-const carRouteDurationMetricLabel = 'tempo de carro';
-const carRouteDurationUnavailable = 'Indisponível';
-
 /// Indicador de disponibilidade da unidade, ou o motivo de não haver um.
 class UnitAvailabilityStatus extends StatelessWidget {
   const UnitAvailabilityStatus({required this.unit, this.now, super.key});
@@ -153,62 +149,49 @@ class ServiceChips extends StatelessWidget {
   }
 }
 
-class MetricColumn extends StatelessWidget {
-  const MetricColumn({
-    required this.value,
-    required this.label,
+/// Apresentação consistente da espera, inclusive quando a leitura perdeu a validade.
+class UnitWaitEstimate extends StatelessWidget {
+  const UnitWaitEstimate({
+    required this.unit,
+    required this.now,
+    this.showUpdate = false,
+    this.showLabel = true,
     super.key,
-    this.alignment = CrossAxisAlignment.start,
-    this.compact = false,
   });
 
-  final String value;
-  final String label;
-  final CrossAxisAlignment alignment;
-  final bool compact;
+  final HealthUnit unit;
+  final DateTime now;
+  final bool showUpdate;
+  final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
-    final textAlign = switch (alignment) {
-      CrossAxisAlignment.center => TextAlign.center,
-      CrossAxisAlignment.end => TextAlign.end,
-      _ => TextAlign.start,
-    };
-    final valueAlign = switch (alignment) {
-      CrossAxisAlignment.center => Alignment.center,
-      CrossAxisAlignment.end => Alignment.centerRight,
-      _ => Alignment.centerLeft,
-    };
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: alignment,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: valueAlign,
-            child: Text(
-              value,
-              maxLines: 1,
-              softWrap: false,
-              textAlign: textAlign,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: AppColors.ink,
-                fontWeight: FontWeight.w700,
-                fontSize: compact ? 20 : null,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
+    final wait = unit.currentOperationalDataAt(now)?.waitMinutes;
+    final stale = unit.operationalState(now: now) == OperationalDataState.stale;
+    final time = unit.operationalData?.updatedAt;
+    final labels = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          wait != null
+              ? '$wait min'
+              : stale
+              ? 'Espera sem atualização'
+              : 'Espera sem estimativa',
+          style: labels.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        if (wait != null && showLabel)
+          Text('Espera estimada', style: labels.bodySmall),
+        if (showUpdate && time != null && (wait != null || stale))
           Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall
-                ?.copyWith(color: AppColors.muted, height: 1.25),
+            stale
+                ? 'Última leitura em ${formatUpdateTime(time)}'
+                : 'Atualizada em ${formatUpdateTime(time)}',
+            style: labels.bodySmall?.copyWith(color: AppColors.muted),
           ),
-        ],
-      ),
+      ],
     );
   }
 }
