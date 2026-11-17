@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/screens/availability_screen.dart';
+import 'package:rotasaude/screens/discovery/discovery_comparison_tab.dart';
+import 'package:rotasaude/screens/discovery/discovery_empty_results.dart';
+import 'package:rotasaude/screens/discovery/discovery_list_tab.dart';
+import 'package:rotasaude/screens/discovery/discovery_map_tab.dart';
 import 'package:rotasaude/screens/location_selection_screen.dart';
 import 'package:rotasaude/screens/route_preview_screen.dart';
 import 'package:rotasaude/screens/unit_details_screen.dart';
@@ -16,8 +19,6 @@ import 'package:rotasaude/services/location_access.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/services/user_location_session_store.dart';
 import 'package:rotasaude/theme/app_colors.dart';
-import 'package:rotasaude/theme/app_theme.dart';
-import 'package:rotasaude/widgets/unit_ui.dart';
 
 enum _DiscoveryTab { map, list, compare }
 
@@ -243,10 +244,11 @@ class _MapScreenState extends State<MapScreen> {
     return units;
   }
 
-  HealthUnit? get _selectedUnit {
-    final selectedId = _selectedUnitId;
-    if (selectedId == null) return null;
-    return _visibleUnits.where((unit) => unit.id == selectedId).firstOrNull;
+  void _keepSelectionVisible() {
+    final units = _visibleUnits;
+    if (units.any((unit) => unit.id == _selectedUnitId)) return;
+    _selectedUnitId = units.firstOrNull?.id;
+    _mapUnitSummaryDismissed = false;
   }
 
   List<String> get _services =>
@@ -311,18 +313,27 @@ class _MapScreenState extends State<MapScreen> {
     setState(() => _tab = _DiscoveryTab.values[index]);
   }
 
-  void _collapseSearch() {
-    FocusScope.of(context).unfocus();
-    setState(() => _searchExpanded = false);
+  void _toggleSearch() {
+    if (_searchExpanded) FocusScope.of(context).unfocus();
+    setState(() => _searchExpanded = !_searchExpanded);
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _query = '';
+      _searchController.clear();
+      _serviceFilter = null;
+    });
+  }
+
+  void _selectListUnit(String unitId) {
+    setState(() => _selectedUnitId = unitId);
   }
 
   void _updateServiceFilter(String? service) {
     setState(() {
       _serviceFilter = service;
-      if (!_visibleUnits.any((unit) => unit.id == _selectedUnitId)) {
-        _selectedUnitId = _visibleUnits.firstOrNull?.id;
-        _mapUnitSummaryDismissed = false;
-      }
+      _keepSelectionVisible();
     });
   }
 
@@ -370,10 +381,7 @@ class _MapScreenState extends State<MapScreen> {
                   controller: _searchController,
                   onChanged: (value) => setState(() {
                     _query = value;
-                    if (_selectedUnit == null) {
-                      _selectedUnitId = _visibleUnits.firstOrNull?.id;
-                      _mapUnitSummaryDismissed = false;
-                    }
+                    _keepSelectionVisible();
                   }),
                   textInputAction: TextInputAction.search,
                   decoration: InputDecoration(
@@ -431,11 +439,75 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _buildTab() => switch (_tab) {
-    _DiscoveryTab.map => _buildMap(),
-    _DiscoveryTab.list => _buildList(),
-    _DiscoveryTab.compare => _buildComparison(),
-  };
+  Widget _buildTab() {
+    final loadState = _buildLoadState();
+    final units = _visibleUnits;
+    final now = _now;
+    final distances = _straightLineKmLookup;
+    final searchAction = _query.isEmpty && _tab != _DiscoveryTab.map
+        ? IconButton(
+            tooltip: _searchExpanded ? 'Fechar busca' : 'Buscar unidade',
+            onPressed: _toggleSearch,
+            icon: Icon(_searchExpanded ? Icons.close : Icons.search),
+          )
+        : null;
+    return switch (_tab) {
+      _DiscoveryTab.map =>
+        loadState ??
+            DiscoveryMapTab(
+              area: _area,
+              userOrigin: widget.userOrigin,
+              mapController: _mapController,
+              units: units,
+              hasUnits: _units.isNotEmpty,
+              selectedUnitId: _selectedUnitId,
+              summaryUnit: _mapUnitSummaryDismissed
+                  ? null
+                  : units
+                        .where((unit) => unit.id == _selectedUnitId)
+                        .firstOrNull,
+              straightLineKmByUnitId: distances,
+              now: now,
+              onSelectUnit: _selectMapUnit,
+              onDismissSummary: _dismissMapUnitSummary,
+              onDetails: _showDetails,
+              onChooseArea: _chooseArea,
+              onClearFilters: _clearFilters,
+            ),
+      _DiscoveryTab.list => DiscoveryListTab(
+        area: _area,
+        units: units,
+        hasUnits: _units.isNotEmpty,
+        loadState: loadState,
+        straightLineKmByUnitId: distances,
+        now: now,
+        selectedUnitId: _selectedUnitId,
+        searchAction: searchAction,
+        services: _services,
+        serviceFilter: _serviceFilter,
+        sortOrder: _sortOrder,
+        onChooseArea: _chooseArea,
+        onSelectUnit: _selectListUnit,
+        onDetails: _showDetails,
+        onClearFilters: _clearFilters,
+        onServiceFilterChanged: _updateServiceFilter,
+        onSortOrderChanged: (order) => setState(() => _sortOrder = order),
+      ),
+      _DiscoveryTab.compare => DiscoveryComparisonTab(
+        units: units,
+        loadState: loadState,
+        straightLineKmByUnitId: distances,
+        now: now,
+        selectedUnitId: _selectedUnitId,
+        searchAction: searchAction,
+        travelMode: _travelMode,
+        onChooseArea: _chooseArea,
+        onSelectUnit: _selectListUnit,
+        onDetails: _showDetails,
+        onTravelModeChanged: (mode) => setState(() => _travelMode = mode),
+      ),
+    };
+  }
 
   /// Carregamento ou falha da consulta; `null` quando há resultado a mostrar.
   Widget? _buildLoadState() => switch (_loadStatus) {
@@ -446,419 +518,6 @@ class _MapScreenState extends State<MapScreen> {
     ),
     _LoadStatus.loaded => null,
   };
-
-  Widget _buildMap() {
-    final loadState = _buildLoadState();
-    if (loadState != null) return loadState;
-    final units = _visibleUnits;
-    final coord = widget.userOrigin.coordinate;
-    final center = _area?.center ?? coord;
-    final withinDemoArea =
-        _area?.id == SearchArea.goiania.id &&
-        Geolocator.distanceBetween(
-              coord.latitude,
-              coord.longitude,
-              SearchArea.goiania.center.latitude,
-              SearchArea.goiania.center.longitude,
-            ) <=
-            35000;
-
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(initialCenter: center, initialZoom: 13),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.edufrancadev.rotasaude',
-              errorTileCallback: (tile, error, stackTrace) {},
-            ),
-            MarkerLayer(
-              markers: [
-                if (withinDemoArea)
-                  Marker(
-                    point: coord,
-                    width: 52,
-                    height: 52,
-                    child: Semantics(
-                      label: widget.userOrigin.mapMarkerSemanticsLabel,
-                      child: Icon(
-                        widget.userOrigin.isManual
-                            ? Icons.place_rounded
-                            : Icons.my_location_rounded,
-                        size: 34,
-                        color: AppColors.blue,
-                        shadows: [Shadow(color: Colors.white, blurRadius: 8)],
-                      ),
-                    ),
-                  ),
-                for (final unit in units)
-                  if (isValidGeographicPosition(unit.position))
-                    Marker(
-                      point: unit.position,
-                      width: 120,
-                      height: 66,
-                      alignment: const Alignment(0, 0.36),
-                      child: Semantics(
-                        excludeSemantics: true,
-                        button: true,
-                        label:
-                            '${unit.name}, ${unit.operationalSummaryAt(_now)}',
-                        selected: _selectedUnitId == unit.id,
-                        onTap: () => _selectMapUnit(unit.id),
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => _selectMapUnit(unit.id),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color:
-                                        unit.currentAvailability?.color ??
-                                        AppColors.muted,
-                                    width: 3,
-                                  ),
-                                ),
-                                child: SizedBox(
-                                  width: 42,
-                                  height: 42,
-                                  child: Icon(
-                                    Icons.local_hospital_outlined,
-                                    color:
-                                        unit.currentAvailability?.color ??
-                                        AppColors.muted,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.92),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 1,
-                                  ),
-                                  child: Text(
-                                    unit.name.replaceFirst(
-                                      'UPA Exemplo ',
-                                      'UPA ',
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: AppColors.navy,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-              ],
-            ),
-          ],
-        ),
-        const Align(
-          alignment: Alignment.topLeft,
-          child: SafeArea(
-            child: Padding(
-              padding: EdgeInsets.all(8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.all(Radius.circular(6)),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                  child: Text(
-                    '© OpenStreetMap contributors',
-                    style: TextStyle(fontSize: 10, color: AppColors.navy),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        if (_area == null || units.isEmpty)
-          Center(
-            child: _EmptyResults(
-              title: _area == null
-                  ? 'Escolha uma cidade para consultar unidades'
-                  : _units.isEmpty
-                  ? 'Nenhuma unidade cadastrada nesta área'
-                  : 'Nenhuma unidade encontrada',
-              message: _area == null
-                  ? 'O ponto escolhido está fora das áreas com unidades '
-                        'cadastradas.'
-                  : _units.isEmpty
-                  ? 'Você pode alterar a cidade a qualquer momento.'
-                  : 'Tente outra busca ou limpe os filtros aplicados.',
-              actionLabel: _units.isEmpty || _area == null
-                  ? 'Escolher localização'
-                  : 'Limpar filtros',
-              onAction: _units.isEmpty || _area == null
-                  ? _chooseArea
-                  : () => setState(() {
-                      _query = '';
-                      _searchController.clear();
-                      _serviceFilter = null;
-                    }),
-            ),
-          )
-        else if (_selectedUnit != null && !_mapUnitSummaryDismissed)
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.sizeOf(context).height * 0.38,
-              ),
-              child: SingleChildScrollView(
-                child: _DismissibleMapUnitSummary(
-                  key: const ValueKey('map-unit-summary-card'),
-                  onDismissed: _dismissMapUnitSummary,
-                  child: _MapUnitSummary(
-                    unit: _selectedUnit!,
-                    operational: _operationalAt(_selectedUnit!),
-                    straightLineKm: _straightLineKm(_selectedUnit!),
-                    now: _now,
-                    onDetails: () => _showDetails(_selectedUnit!),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildList() {
-    final loadState = _buildLoadState();
-    final units = _visibleUnits;
-    final Widget body;
-    if (loadState != null) {
-      body = loadState;
-    } else if (_units.isEmpty) {
-      body = _EmptyResults(
-        title: 'Nenhuma unidade cadastrada nesta área',
-        message: 'Você pode alterar a cidade a qualquer momento.',
-        actionLabel: 'Escolher localização',
-        onAction: _chooseArea,
-      );
-    } else if (units.isEmpty) {
-      body = _EmptyResults(
-        title: 'Nenhuma unidade encontrada',
-        message: 'Tente outra busca ou limpe os filtros aplicados.',
-        actionLabel: 'Limpar filtros',
-        onAction: () => setState(() {
-          _query = '';
-          _searchController.clear();
-          _serviceFilter = null;
-        }),
-      );
-    } else {
-      body = ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
-        itemCount: units.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          final unit = units[index];
-          return _UnitListCard(
-            unit: unit,
-            operational: _operationalAt(unit),
-            straightLineKm: _straightLineKm(unit),
-            now: _now,
-            selected: _selectedUnitId == unit.id,
-            onSelect: () => setState(() => _selectedUnitId = unit.id),
-            onDetails: () => _showDetails(unit),
-          );
-        },
-      );
-    }
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Unidades próximas',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Alterar localização consultada',
-                    onPressed: _chooseArea,
-                    icon: const Icon(Icons.place_outlined),
-                  ),
-                  if (_query.isEmpty)
-                    IconButton(
-                      tooltip: _searchExpanded
-                          ? 'Fechar busca'
-                          : 'Buscar unidade',
-                      onPressed: _searchExpanded
-                          ? _collapseSearch
-                          : () => setState(() => _searchExpanded = true),
-                      icon: Icon(_searchExpanded ? Icons.close : Icons.search),
-                    ),
-                ],
-              ),
-              if (loadState == null) ...[
-                Text(
-                  '${units.length} ${units.length == 1 ? 'unidade' : 'unidades'} · ${_area?.name ?? 'Área não definida'}',
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: AppColors.muted),
-                ),
-                if (units.any((unit) => unit.isDemo)) ...[
-                  const SizedBox(height: 6),
-                  const IllustrativeNotice(compact: true, short: true),
-                ],
-              ],
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: _FilterDropdown<String?>(
-                  label: 'Atendimento',
-                  value: _serviceFilter,
-                  items: [null, ..._services],
-                  itemLabel: (value) => value ?? 'Todos',
-                  onChanged: _updateServiceFilter,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _FilterDropdown<String>(
-                  label: 'Ordenar',
-                  value: _sortOrder,
-                  items: const ['Destaque', 'Menor espera', 'Proximidade'],
-                  itemLabel: (value) => value,
-                  onChanged: (value) => setState(() => _sortOrder = value),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: body),
-      ],
-    );
-  }
-
-  Widget _buildComparison() {
-    final loadState = _buildLoadState();
-    final units = _visibleUnits;
-    final Widget body;
-    if (loadState != null) {
-      body = loadState;
-    } else if (units.isEmpty) {
-      body = const _EmptyResults(
-        title: 'Nenhuma unidade para comparar',
-        message: 'Altere a cidade ou os filtros da lista.',
-      );
-    } else {
-      body = ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-        itemCount: units.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          final unit = units[index];
-          return _ComparisonCard(
-            unit: unit,
-            operational: _operationalAt(unit),
-            straightLineKm: _straightLineKm(unit),
-            now: _now,
-            mode: _travelMode,
-            selected: _selectedUnitId == unit.id,
-            onSelect: () => setState(() => _selectedUnitId = unit.id),
-            onDetails: () => _showDetails(unit),
-          );
-        },
-      );
-    }
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Comparar unidades',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Alterar localização consultada',
-                    onPressed: _chooseArea,
-                    icon: const Icon(Icons.place_outlined),
-                  ),
-                  if (_query.isEmpty)
-                    IconButton(
-                      tooltip: _searchExpanded
-                          ? 'Fechar busca'
-                          : 'Buscar unidade',
-                      onPressed: _searchExpanded
-                          ? _collapseSearch
-                          : () => setState(() => _searchExpanded = true),
-                      icon: Icon(_searchExpanded ? Icons.close : Icons.search),
-                    ),
-                ],
-              ),
-              Text(
-                'Compare espera, deslocamento e atendimento',
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: AppColors.muted),
-              ),
-              if (units.any((unit) => unit.isDemo)) ...[
-                const SizedBox(height: 4),
-                const IllustrativeNotice(compact: true, short: true),
-              ],
-              const SizedBox(height: 4),
-              SegmentedButton<TravelMode>(
-                style: AppTheme.primarySegmentedButtonStyle,
-                segments: const [
-                  ButtonSegment(value: TravelMode.car, label: Text('Carro')),
-                  ButtonSegment(value: TravelMode.bus, label: Text('Ônibus')),
-                ],
-                selected: {_travelMode},
-                onSelectionChanged: (selection) =>
-                    setState(() => _travelMode = selection.first),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: body),
-      ],
-    );
-  }
 }
 
 class _DiscoveryHeader extends StatelessWidget {
@@ -973,446 +632,6 @@ class _StalePositionNotice extends StatelessWidget {
   }
 }
 
-class _DismissibleMapUnitSummary extends StatefulWidget {
-  const _DismissibleMapUnitSummary({
-    required this.onDismissed,
-    required this.child,
-    super.key,
-  });
-
-  final VoidCallback onDismissed;
-  final Widget child;
-
-  @override
-  State<_DismissibleMapUnitSummary> createState() =>
-      _DismissibleMapUnitSummaryState();
-}
-
-class _DismissibleMapUnitSummaryState
-    extends State<_DismissibleMapUnitSummary> {
-  static const _dismissDragThreshold = 72.0;
-
-  double _dragExtent = 0;
-
-  void _onVerticalDragEnd(DragEndDetails details) {
-    final velocity = details.primaryVelocity ?? 0;
-    final shouldDismiss =
-        _dragExtent >= _dismissDragThreshold || velocity > 700;
-    if (shouldDismiss) {
-      widget.onDismissed();
-      return;
-    }
-    setState(() => _dragExtent = 0);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final opacity = (1 - (_dragExtent / 180)).clamp(0.35, 1.0).toDouble();
-    return Semantics(
-      label: 'Resumo da unidade. Arraste para baixo para ocultar.',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onVerticalDragUpdate: (details) {
-          setState(() {
-            _dragExtent = (_dragExtent + details.delta.dy).clamp(0.0, 220.0);
-          });
-        },
-        onVerticalDragEnd: _onVerticalDragEnd,
-        child: Transform.translate(
-          offset: Offset(0, _dragExtent),
-          child: Opacity(opacity: opacity, child: widget.child),
-        ),
-      ),
-    );
-  }
-}
-
-class _MapUnitSummary extends StatelessWidget {
-  const _MapUnitSummary({
-    required this.unit,
-    required this.operational,
-    required this.straightLineKm,
-    required this.now,
-    required this.onDetails,
-  });
-
-  final HealthUnit unit;
-  final UnitOperationalData? operational;
-  final double? straightLineKm;
-  final DateTime now;
-  final VoidCallback onDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-      color: Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Semantics(
-              label: 'Arraste para baixo para ocultar o resumo',
-              container: true,
-              child: Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.border,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-            ),
-            Text(
-              unit.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            UnitAvailabilityStatus(unit: unit, now: now),
-            if (operational != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  MetricColumn(
-                    value: '${operational!.waitMinutes ?? '—'} min',
-                    label: 'espera',
-                  ),
-                  MetricColumn(
-                    value: formatStraightLineDistanceValue(straightLineKm),
-                    label: straightLineDistanceMetricLabel,
-                  ),
-                  MetricColumn(
-                    value: unit.carRoute?.durationMinutes == null
-                        ? carRouteDurationUnavailable
-                        : '${unit.carRoute!.durationMinutes} min',
-                    label: carRouteDurationMetricLabel,
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 8),
-            FilledButton(
-              onPressed: onDetails,
-              child: const Text('Ver detalhes'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _UnitListCard extends StatelessWidget {
-  const _UnitListCard({
-    required this.unit,
-    required this.operational,
-    required this.straightLineKm,
-    required this.now,
-    required this.selected,
-    required this.onSelect,
-    required this.onDetails,
-  });
-
-  final HealthUnit unit;
-  final UnitOperationalData? operational;
-  final double? straightLineKm;
-  final DateTime now;
-  final bool selected;
-  final VoidCallback onSelect;
-  final VoidCallback onDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card.outlined(
-      key: ValueKey('unit-card-${unit.id}'),
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: selected ? AppColors.blue : AppColors.border,
-          width: selected ? 2 : 1,
-        ),
-      ),
-      child: Semantics(
-        selected: selected,
-        child: InkWell(
-          onTap: onSelect,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        unit.name,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: AppColors.navy,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Ver detalhes de ${unit.name}',
-                      onPressed: onDetails,
-                      icon: const Icon(Icons.arrow_forward, size: 20),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                UnitAvailabilityStatus(unit: unit, now: now),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 10),
-                  child: Divider(height: 1),
-                ),
-                Row(
-                  children: [
-                    MetricColumn(
-                      value: '${operational?.waitMinutes ?? '—'} min',
-                      label: 'espera',
-                    ),
-                    MetricColumn(
-                      value: formatStraightLineDistanceValue(straightLineKm),
-                      label: straightLineDistanceMetricLabel,
-                      alignment: CrossAxisAlignment.center,
-                    ),
-                    MetricColumn(
-                      value: unit.carRoute?.durationMinutes == null
-                          ? carRouteDurationUnavailable
-                          : '${unit.carRoute!.durationMinutes} min',
-                      label: carRouteDurationMetricLabel,
-                      alignment: CrossAxisAlignment.end,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ComparisonCard extends StatelessWidget {
-  const _ComparisonCard({
-    required this.unit,
-    required this.operational,
-    required this.straightLineKm,
-    required this.now,
-    required this.mode,
-    required this.selected,
-    required this.onSelect,
-    required this.onDetails,
-  });
-
-  final HealthUnit unit;
-  final UnitOperationalData? operational;
-  final double? straightLineKm;
-  final DateTime now;
-  final TravelMode mode;
-  final bool selected;
-  final VoidCallback onSelect;
-  final VoidCallback onDetails;
-
-  @override
-  Widget build(BuildContext context) {
-    final route = unit.routeFor(mode);
-    return Card.outlined(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: selected ? AppColors.blue : AppColors.border,
-          width: selected ? 2 : 1,
-        ),
-      ),
-      child: Semantics(
-        selected: selected,
-        child: InkWell(
-          onTap: onSelect,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        unit.name,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColors.navy,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Ver detalhes de ${unit.name}',
-                      onPressed: onDetails,
-                      icon: const Icon(Icons.arrow_forward, size: 20),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                UnitAvailabilityStatus(unit: unit, now: now),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    MetricColumn(
-                      value: operational?.waitMinutes == null
-                          ? 'Indisponível'
-                          : '${operational!.waitMinutes} min',
-                      label: 'espera',
-                      compact: true,
-                    ),
-                    MetricColumn(
-                      value: route == null
-                          ? 'Indisponível'
-                          : '${route.durationMinutes} min',
-                      label: mode.label,
-                      alignment: CrossAxisAlignment.center,
-                      compact: true,
-                    ),
-                    MetricColumn(
-                      value: formatStraightLineDistanceValue(straightLineKm),
-                      label: straightLineDistanceMetricLabel,
-                      alignment: CrossAxisAlignment.end,
-                      compact: true,
-                    ),
-                  ],
-                ),
-                if (unit.services.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    unit.services.join(' · '),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: AppColors.muted),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterDropdown<T> extends StatelessWidget {
-  const _FilterDropdown({
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.itemLabel,
-    required this.onChanged,
-  });
-
-  final String label;
-  final T value;
-  final List<T> items;
-  final String Function(T value) itemLabel;
-  final ValueChanged<T> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(13),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(13),
-          borderSide: const BorderSide(color: AppColors.border),
-        ),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          value: value,
-          isExpanded: true,
-          onChanged: (item) {
-            if (item != null) onChanged(item);
-          },
-          items: [
-            for (final item in items)
-              DropdownMenuItem(value: item, child: Text(itemLabel(item))),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyResults extends StatelessWidget {
-  const _EmptyResults({
-    required this.title,
-    required this.message,
-    this.icon = Icons.place_outlined,
-    this.actionLabel,
-    this.onAction,
-  });
-
-  final String title;
-  final String message;
-  final IconData icon;
-  final String? actionLabel;
-  final VoidCallback? onAction;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 42, color: AppColors.muted),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: AppColors.navy,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: AppColors.muted),
-            ),
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 12),
-              OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _LoadingUnits extends StatelessWidget {
   const _LoadingUnits();
 
@@ -1473,7 +692,7 @@ class _LoadFailure extends StatelessWidget {
     };
     return ColoredBox(
       color: AppColors.background,
-      child: _EmptyResults(
+      child: DiscoveryEmptyResults(
         title: title,
         message: message,
         icon: icon,
