@@ -142,6 +142,8 @@ DEMO_STALE_AFTER_MINUTES = int(os.environ.get("DEMO_STALE_AFTER_MINUTES", "30"))
 # valor inválido aqui não pode impedir a API de iniciar.
 DEMO_AUTO_UPDATE = env_bool("DEMO_AUTO_UPDATE", False)
 DEMO_UPDATE_INTERVAL = os.environ.get("DEMO_UPDATE_INTERVAL", "60")
+# Simulação somente na resposta da API, inclusive com DEBUG desligado.
+DEMO_API_QUEUE_SIMULATION = env_bool("DEMO_API_QUEUE_SIMULATION", False)
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
     "integration": INTEGRATION_RATE_LIMIT,

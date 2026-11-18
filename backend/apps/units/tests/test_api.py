@@ -1,4 +1,7 @@
-from django.test import TestCase
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from apps.units.models import UnitOperationalStatus
@@ -186,3 +189,52 @@ class PublicEndpointsAreReadOnlyTests(TestCase):
         self.client.delete(self.urls[1])
 
         self.assertEqual(list(HealthUnit.objects.values_list("external_id", flat=True)), ["upa-centro"])
+
+
+@override_settings(DEMO_API_QUEUE_SIMULATION=True, DEMO_MODE=False, DEBUG=False)
+class SimulatedQueueApiTests(TestCase):
+    def test_demo_queue_changes_by_minute_and_keeps_api_contract(self):
+        make_unit("upa-centro", is_demo=True, name="UPA Exemplo Centro")
+        minute = datetime(2026, 11, 18, 19, 0, tzinfo=timezone.utc)
+        list_url = reverse("v1:unit-list")
+        detail_url = reverse("v1:unit-detail", args=["upa-centro"])
+
+        with patch("apps.units.serializers.timezone.now", return_value=minute):
+            first = self.client.get(list_url).json()["results"][0]
+        with patch("apps.units.serializers.timezone.now", return_value=minute + timedelta(seconds=55)):
+            same_minute = self.client.get(detail_url).json()
+        with patch("apps.units.serializers.timezone.now", return_value=minute + timedelta(minutes=1)):
+            next_minute = self.client.get(detail_url).json()
+
+        status = first["operational_status"]
+        self.assertEqual(first, same_minute)
+        self.assertTrue(first["is_demo"])
+        self.assertTrue(status["is_demo"])
+        self.assertIn("dados simulados", first["name"])
+        self.assertEqual(first["last_operational_update_at"], status["source_updated_at"])
+        self.assertEqual(status["source_updated_at"], status["received_at"])
+        self.assertNotEqual(status["people_waiting"], next_minute["operational_status"]["people_waiting"])
+        self.assertEqual(UnitOperationalStatus.objects.count(), 0)
+
+    def test_real_units_and_reserved_demo_units_keep_stored_values(self):
+        real = make_unit("upa-centro", name="UPA Real")
+        make_unit("upa-oeste", is_demo=True)
+        make_status(real, people_waiting=17)
+
+        units = {unit["id"]: unit for unit in self.client.get(reverse("v1:unit-list")).json()["results"]}
+
+        self.assertEqual(units["upa-centro"]["name"], "UPA Real")
+        self.assertEqual(units["upa-centro"]["operational_status"]["people_waiting"], 17)
+        self.assertFalse(units["upa-centro"]["operational_status"]["is_demo"])
+        self.assertIsNone(units["upa-oeste"]["operational_status"])
+        self.assertIsNone(units["upa-oeste"]["last_operational_update_at"])
+
+    @override_settings(DEMO_API_QUEUE_SIMULATION=False)
+    def test_setting_off_uses_stored_demo_values(self):
+        unit = make_unit("upa-centro", is_demo=True, name="UPA Exemplo Centro")
+        make_status(unit, people_waiting=17, is_demo=True)
+
+        data = self.client.get(reverse("v1:unit-detail", args=["upa-centro"])).json()
+
+        self.assertEqual(data["name"], "UPA Exemplo Centro")
+        self.assertEqual(data["operational_status"]["people_waiting"], 17)
