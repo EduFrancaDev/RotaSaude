@@ -29,5 +29,22 @@ services:
       db:
         condition: service_healthy
 
+  # Atualização automática dos dados DEMONSTRATIVOS, em processo separado da API (que não
+  # depende dele). Com DEMO_AUTO_UPDATE=false, registra isso e sai com código 0.
+  # Veja docs/demo-academica.md.
+  simulator:
+    build: .
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    # Forma exec: o Python é o PID 1 e recebe o SIGTERM do `stop` para encerrar limpo.
+    command: ["python", "manage.py", "run_demo_auto_update"]
+    restart: on-failure:5
+    stop_grace_period: 15s
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:

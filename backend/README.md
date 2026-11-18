@@ -275,8 +275,9 @@ backend/
 │                      endpoint de ingestão e comando create_integration_credential
 ├── apps/routing/      RoutingProvider, OSRM, GET /routes/
 ├── apps/demo/         modo de demonstração acadêmica: cenários, simulador, rota de ônibus
-│                      simulada e comandos seed_demo_scenarios, simulate_operational_status
-│                      e show_demo_status (DemoReadingMark; veja docs/demo-academica.md)
+│                      simulada e comandos seed_demo_scenarios, simulate_operational_status,
+│                      run_demo_auto_update e show_demo_status (DemoReadingMark; veja
+│                      docs/demo-academica.md)
 ├── compose.yaml · Dockerfile · requirements.txt · .env.example
 ```
 
@@ -295,6 +296,16 @@ python manage.py seed_demo_scenarios
 python manage.py simulate_operational_status --all --scenario random --interval 60   # Ctrl+C encerra
 python manage.py show_demo_status --unit upa-centro --history 10
 ```
+
+**Atualização automática.** `DEMO_AUTO_UPDATE` (padrão `false`) e `DEMO_UPDATE_INTERVAL` (segundos, padrão `60`, mínimo 5) controlam o comando `run_demo_auto_update`, que roda como o serviço `simulator` do `compose.yaml`: processo separado, mesmo banco, sem dependência da API. Ele grava cenários `random` nas UPAs de cenário, preserva as UPAs reservadas, registra cada ciclo no log, sobrevive a falhas de banco, usa um advisory lock do PostgreSQL para que só uma instância grave e encerra limpo com `SIGTERM`/`SIGINT`. Com `DEMO_AUTO_UPDATE=false` sai com código 0; sem `DEMO_MODE` é recusado.
+
+```bash
+docker compose up -d simulator           # com DEMO_AUTO_UPDATE=true no .env
+docker compose logs -f simulator
+docker compose stop simulator            # a API continua no ar
+```
+
+Detalhes, hospedagem e desativação: [`docs/demo-academica.md`, seção 5.1](../docs/demo-academica.md#51-atualização-automática-serviço-simulator).
 
 ## Histórico operacional e Admin
 

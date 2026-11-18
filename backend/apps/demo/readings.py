@@ -30,6 +30,22 @@ def demo_units():
     return HealthUnit.objects.filter(is_demo=True, is_active=True).order_by("external_id")
 
 
+def scenario_units():
+    """UPAs alteradas por `--all` e pela atualização automática: as reservadas ficam de fora."""
+    return [u for u in demo_units() if not (PROFILES.get(u.external_id) and PROFILES[u.external_id].reserved)]
+
+
+def describe_reading(unit, scenario_key, reading):
+    """Linha legível de uma leitura gravada, usada no terminal e nos logs do simulador."""
+    at = timezone.localtime(reading.source_updated_at).strftime("%H:%M:%S")
+    values = (
+        "sem valores (falha de atualização)"
+        if scenario_key == "unavailable"
+        else f"{reading.people_waiting} pessoas · {reading.estimated_wait_minutes} min · {reading.availability_level}"
+    )
+    return f"[{at}] {unit.external_id:<13} {SCENARIOS[scenario_key].label} → {values} [DEMONSTRATIVO]"
+
+
 def resolve_scenario(unit, requested, rng=None):
     """Traduz `random` e `baseline` no cenário concreto a gravar para a unidade."""
     if requested == BASELINE:

@@ -103,7 +103,7 @@ Se o `adb` responder `device not found`, a porta mudou. Leia de novo a tela **De
 
 - [Arquitetura mobile e decisões iniciais](docs/arquitetura-mobile.md)
 - [Backend MVP: execução, endpoints e testes](backend/README.md)
-- [Demonstração acadêmica: cenários, simulador e rota de ônibus simulada](docs/demo-academica.md). Ambiente Podman completo em um comando: `./scripts/start-demo.sh` (API em `http://127.0.0.1:8001`, Postgres em `127.0.0.1:55434`); encerrar com `./scripts/stop-demo.sh`. Com ele, use a porta 8001 nos comandos `adb reverse` e `API_BASE_URL` acima.
+- [Demonstração acadêmica: cenários, simulador e rota de ônibus simulada](docs/demo-academica.md). Ambiente Podman completo em um comando: `./scripts/start-demo.sh` (API em `http://127.0.0.1:8001`, Postgres em `127.0.0.1:55434`); encerrar com `./scripts/stop-demo.sh`. Com ele, use a porta 8001 nos comandos `adb reverse` e `API_BASE_URL` acima. Com `DEMO_AUTO_UPDATE=true` no `backend/.env`, o script também sobe o serviço `simulator`, que mantém as UPAs fictícias atualizadas sozinho (seção 5.1 do guia).
 - [Tecnologias e proposta N1](docs/tecnologias.md)
 - [Identidade visual e arquivos SVG](mobile/assets/brand/README.md)
 - [Apresentação visual N1](docs/n1/RotaSaude_N1_apresentacao_visual_final.pdf)

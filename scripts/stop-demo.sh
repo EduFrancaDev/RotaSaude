@@ -25,11 +25,12 @@ info "Parando o projeto $PROJECT (sem remover contêineres nem volumes)"
 if [ -z "$(project_containers)" ]; then
   ok "nenhum contêiner de $PROJECT encontrado; nada a fazer"
 else
-  # Para pelos nomes (apenas ${PROJECT}_*), independentemente do diretório atual.
-  for name in $(project_containers); do
-    # Postgres: prazo generoso para encerrar limpo. API: o runserver sob `sh -c` não repassa o
-    # SIGTERM e não guarda estado, então um prazo curto evita esperar à toa.
-    case "$name" in *_db_*) grace=30 ;; *) grace=2 ;; esac
+  # Para pelos nomes (apenas ${PROJECT}_*), independentemente do diretório atual. O simulador
+  # para primeiro, enquanto o banco ainda responde, para concluir o ciclo em andamento.
+  for name in $(project_containers | grep '_simulator_') $(project_containers | grep -v '_simulator_'); do
+    # Postgres e simulador: prazo para encerrar limpo (o simulador trata o SIGTERM). API: o
+    # runserver sob `sh -c` não repassa o SIGTERM e não guarda estado, então o prazo é curto.
+    case "$name" in *_db_*) grace=30 ;; *_simulator_*) grace=15 ;; *) grace=2 ;; esac
     podman stop -t "$grace" "$name" >/dev/null 2>&1 && ok "parado: $name"
   done
 fi
