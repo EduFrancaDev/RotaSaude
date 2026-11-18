@@ -6,8 +6,9 @@ Exemplos:
     python manage.py simulate_operational_status --all --scenario random --interval 60
 
 Cada execução acrescenta leituras novas ao histórico (nada é alterado ou apagado) e só atua
-em unidades `is_demo`. O processo periódico é sempre iniciado manualmente; encerre com Ctrl+C
-(SIGINT) ou SIGTERM, que terminam o ciclo em andamento antes de sair.
+em unidades `is_demo`. Este modo periódico é iniciado manualmente; encerre com Ctrl+C
+(SIGINT) ou SIGTERM, que terminam o ciclo em andamento antes de sair. A atualização automática
+como serviço separado é o comando `run_demo_auto_update` (veja `apps/demo/autoupdate.py`).
 """
 
 import random
@@ -15,15 +16,18 @@ import signal
 import threading
 
 from django.core.management.base import BaseCommand, CommandError
-from django.utils import timezone
 
+from apps.demo.autoupdate import MIN_INTERVAL_SECONDS
 from apps.demo.guard import DemoModeDisabled, require_demo_mode
-from apps.demo.profiles import PROFILES
-from apps.demo.readings import DemoReadingError, append_demo_reading, demo_units, resolve_scenario
-from apps.demo.scenarios import BASELINE, CHOICES, SCENARIOS
+from apps.demo.readings import (
+    DemoReadingError,
+    append_demo_reading,
+    describe_reading,
+    resolve_scenario,
+    scenario_units,
+)
+from apps.demo.scenarios import BASELINE, CHOICES
 from apps.units.models import HealthUnit
-
-MIN_INTERVAL_SECONDS = 5
 
 
 class Command(BaseCommand):
@@ -94,7 +98,7 @@ class Command(BaseCommand):
 
     def _resolve_units(self, options):
         if options["all"]:
-            units = [u for u in demo_units() if not (PROFILES.get(u.external_id) and PROFILES[u.external_id].reserved)]
+            units = scenario_units()
             if not units:
                 raise CommandError("Nenhuma UPA demonstrativa disponível. Rode seed_demo_scenarios primeiro.")
             return units
@@ -121,12 +125,5 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.WARNING(f"{unit.external_id}: ignorada — {exc}"))
                 continue
             written += 1
-            scenario = SCENARIOS[key]
-            at = timezone.localtime(reading.source_updated_at).strftime("%H:%M:%S")
-            values = (
-                "sem valores (falha de atualização)"
-                if key == "unavailable"
-                else f"{reading.people_waiting} pessoas · {reading.estimated_wait_minutes} min · {reading.availability_level}"
-            )
-            self.stdout.write(f"[{at}] {unit.external_id:<13} {scenario.label} → {values} [DEMONSTRATIVO]")
+            self.stdout.write(describe_reading(unit, key, reading))
         return written

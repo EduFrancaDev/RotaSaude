@@ -34,7 +34,7 @@ Tudo roda no projeto Compose **`rotasaude_demo`** (sempre com `-p rotasaude_demo
 
 | Item | Valor |
 | --- | --- |
-| Projeto Compose | `rotasaude_demo` (contêineres `rotasaude_demo_db_1` e `rotasaude_demo_api_1`) |
+| Projeto Compose | `rotasaude_demo` (contêineres `rotasaude_demo_db_1`, `rotasaude_demo_api_1` e, com a atualização automática, `rotasaude_demo_simulator_1`) |
 | Volume do banco | `rotasaude_demo_pgdata` (nunca é removido pelos scripts) |
 | Banco / usuário | `rotasaude` / `rotasaude` |
 | Postgres (contêiner → host) | `5432` → `127.0.0.1:55434` |
@@ -70,7 +70,7 @@ COMPOSE_PROJECT_NAME=rotasaude_demo
 ./scripts/start-demo.sh          # --no-build reaproveita a imagem atual
 ```
 
-O script é **idempotente** (pode ser repetido) e nunca remove volumes, bancos ou tabelas. Em ordem, ele: valida o `.env` (sem exibir segredos) e exige `DJANGO_DEBUG=true` e `DEMO_MODE=true`; confere se as portas do host estão livres; sobe o projeto `rotasaude_demo` (`up -d --build`); espera o Postgres ficar saudável; confirma a autenticação API → banco pelo `/api/v1/health/`; roda `migrate` e `check`; confirma `DEBUG` e `DEMO_MODE` dentro do contêiner; roda `seed_demo_scenarios`; aplica `simulate_operational_status --all --scenario baseline`; mostra `show_demo_status`; e imprime a URL da API e os passos do Flutter.
+O script é **idempotente** (pode ser repetido) e nunca remove volumes, bancos ou tabelas. Em ordem, ele: valida o `.env` (sem exibir segredos) e exige `DJANGO_DEBUG=true` e `DEMO_MODE=true`; confere se as portas do host estão livres; sobe o projeto `rotasaude_demo` (`up -d --build`); espera o Postgres ficar saudável; confirma a autenticação API → banco pelo `/api/v1/health/`; roda `migrate` e `check`; confirma `DEBUG` e `DEMO_MODE` dentro do contêiner; roda `seed_demo_scenarios`; aplica `simulate_operational_status --all --scenario baseline`; mostra `show_demo_status`; com `DEMO_AUTO_UPDATE=true`, (re)cria o serviço `simulator` e mostra suas primeiras linhas de log (com `false`, para um simulador que tenha ficado ligado); e imprime a URL da API e os passos do Flutter. O simulador sobe só depois do `baseline` para que os sorteios não sejam sobrescritos.
 
 O `baseline` respeita os papéis reservados: `upa-oeste` (sem dados), `upa-leste` (desatualizada) e `upa-sudoeste` (falha de atualização) não são alteradas por `--all`.
 
@@ -122,7 +122,7 @@ Detalhes e todos os cenários estão na seção 5. Nos exemplos das seções 4 a
 ### 3.8 Encerrar e retomar
 
 ```bash
-./scripts/stop-demo.sh           # para API e Postgres do rotasaude_demo; mantém contêineres, banco e volume
+./scripts/stop-demo.sh           # para simulador, API e Postgres do rotasaude_demo; mantém contêineres, banco e volume
 ./scripts/start-demo.sh          # retoma depois; os dados continuam lá
 ```
 
@@ -212,7 +212,70 @@ Garantias: só atua em unidades `is_demo` ativas (`--unit` de uma unidade real �
 
 ### Interromper
 
-O modo periódico só começa quando você o executa. Encerre com **Ctrl+C** (ou `SIGTERM`): o ciclo em andamento termina, os manipuladores de sinal são restaurados e o comando imprime `Simulação encerrada após N ciclo(s).` Nada fica rodando em segundo plano.
+O modo periódico manual (`--interval`) só começa quando você o executa. Encerre com **Ctrl+C** (ou `SIGTERM`): o ciclo em andamento termina, os manipuladores de sinal são restaurados e o comando imprime `Simulação encerrada após N ciclo(s).` Para manter as UPAs atualizadas sem um terminal aberto, use a atualização automática (seção 5.1).
+
+### 5.1 Atualização automática (serviço `simulator`)
+
+O comando `python manage.py run_demo_auto_update` é um processo de longa duração, **separado da API**: no Compose ele é o serviço `simulator`, com a mesma imagem e o mesmo banco da API. A API não depende dele (sobe e responde com o simulador parado, ausente ou com erro), e nada é iniciado pelo Django, por views, middleware ou threads do servidor web.
+
+A cada ciclo ele usa as mesmas regras de `simulate_operational_status` (`resolve_scenario` e `append_demo_reading`): grava o cenário `random` em `upa-centro`, `upa-sul` e `upa-norte`, sem repetir o anterior de cada uma, e renova o cenário crítico de `upa-nordeste`, que permanece **crítica e atual**. `upa-oeste` (sem dados), `upa-leste` (desatualizada) e `upa-sudoeste` (falha de atualização) **nunca** são tocadas, e unidades reais também não. Toda leitura é acrescentada ao histórico; nada é alterado ou apagado.
+
+**Configuração** (`backend/.env`):
+
+| Variável | Padrão | Efeito |
+| --- | --- | --- |
+| `DEMO_AUTO_UPDATE` | `false` | Liga a atualização automática. Com `false`, o serviço registra `Atualização automática desligada` e sai com código 0 (não reinicia). |
+| `DEMO_UPDATE_INTERVAL` | `60` | Segundos entre o início de dois ciclos (inteiro, mínimo 5). Valor inválido impede só o simulador de iniciar, nunca a API. |
+| `DEMO_MODE` e `DJANGO_DEBUG` | — | Precisam ser `true`. Com `DEMO_AUTO_UPDATE=true` e `DEMO_MODE=false`, o serviço é recusado (`CommandError`, código 1) e nada é gravado. |
+
+**Ativar e iniciar:**
+
+```bash
+# backend/.env
+DEMO_AUTO_UPDATE=true
+DEMO_UPDATE_INTERVAL=60        # ex.: 20 para mudanças mais rápidas na apresentação
+
+./scripts/start-demo.sh        # sobe/recria o simulador depois do baseline
+```
+
+Sem o script (a partir de `backend/`): `podman compose -p rotasaude_demo --env-file .env up -d --no-deps --force-recreate simulator`. Sem contêiner: `python manage.py run_demo_auto_update` (Ctrl+C encerra).
+
+**Acompanhar os logs:**
+
+```bash
+podman logs -f rotasaude_demo_simulator_1
+podman ps --filter name=rotasaude_demo_simulator     # "Up" = ativo; "Exited (0)" = desligado por configuração
+```
+
+Cada ciclo registra uma linha por UPA e um resumo (`Ciclo concluído: 4 leitura(s) gravada(s), 0 ignorada(s) em 0.09s.`). O estado consolidado continua em `show_demo_status`.
+
+**Parar, retomar e desabilitar:**
+
+```bash
+podman stop rotasaude_demo_simulator_1    # pausa; a API continua no ar
+podman start rotasaude_demo_simulator_1   # retoma com a mesma configuração
+./scripts/stop-demo.sh                    # para tudo (o simulador primeiro)
+```
+
+Para desabilitar de vez, defina `DEMO_AUTO_UPDATE=false` e rode `./scripts/start-demo.sh` (ele para o simulador que estiver ligado). O `SIGTERM` do `stop` termina o ciclo em andamento e libera a trava antes de sair.
+
+**Falhas e concorrência:**
+
+- Uma UPA que não pode receber leitura é ignorada no ciclo, com aviso no log; as demais seguem.
+- Erro de banco ou inesperado é registrado com o traceback e o ciclo seguinte tenta de novo (a conexão quebrada é descartada e refeita). O processo não encerra por isso. Se ele mesmo cair na partida, o Compose o reinicia até 5 vezes (`restart: on-failure:5`).
+- Só uma instância grava por vez: a que obtém um *advisory lock* do PostgreSQL. Uma segunda instância (outro contêiner, réplica ou terminal) registra `Outra instância do simulador está ativa; esta fica em espera.` e assume sozinha quando a primeira parar. Leituras de um mesmo instante continuam impedidas pela trava da linha da unidade e pela restrição única do banco.
+- Um cenário aplicado manualmente (`simulate_operational_status --unit ...`) fica visível até o próximo ciclo. Para mostrar um caso manual por mais tempo, pause o simulador antes.
+
+**Em hospedagem.** Qualquer serviço que rode processos separados apontando para o mesmo PostgreSQL atende (por exemplo, *background worker* do Render, serviço extra no Railway, *process group* no Fly.io, um segundo contêiner em uma VM com Compose, ou uma unidade systemd):
+
+1. Crie o processo do simulador com a **mesma imagem** e as **mesmas variáveis de banco** (`POSTGRES_*`) da API, mais `DJANGO_DEBUG=true`, `DEMO_MODE=true`, `DEMO_AUTO_UPDATE=true` e `DEMO_UPDATE_INTERVAL`.
+2. Comando de início: `python manage.py run_demo_auto_update` (forma exec, sem `sh -c`, para o processo receber o `SIGTERM` da plataforma). Não exponha porta nem health check HTTP: ele não serve requisições.
+3. Rode as migrações e `seed_demo_scenarios` pelo processo da API (ou um job único). Enquanto as tabelas ou as UPAs não existirem, o simulador apenas registra o erro/aviso e tenta no próximo ciclo.
+4. Uma instância basta; se a plataforma subir mais de uma, as extras ficam em espera pela trava.
+5. Os logs saem no stdout/stderr do processo, visíveis no painel de logs da plataforma.
+6. Para desligar, defina `DEMO_AUTO_UPDATE=false` (o processo sai com código 0) ou remova/escale a zero o worker. A API não é afetada.
+
+> O modo de demonstração exige `DJANGO_DEBUG=true`, que não é seguro para um servidor público. Hospede a demonstração apenas em ambiente temporário e de acesso restrito, nunca em produção.
 
 ### Conferir o estado
 
@@ -276,7 +339,7 @@ Outras formas de conectar (emulador, rede local, sem cabo) estão no `README.md`
 1. **Preparo (antes):** `./scripts/start-demo.sh` (faz `migrate`, `seed_demo_scenarios`, `baseline` e `show_demo_status`). Abra o app e escolha **Goiânia**.
 2. **Mapa e Lista:** 7 UPAs fictícias, sem aviso na tela. Mostre `upa-nordeste` (crítica, 110 min), `upa-centro` (baixa, 15 min), `upa-leste` (*Espera sem atualização*) e `upa-oeste` (*sem estimativa*).
 3. **Atualização ao vivo:** em um terminal, `simulate_operational_status --unit upa-centro --scenario critical`. Em até 30 s a Lista passa de 15 para 110 min. Depois `--scenario unavailable` (dado indisponível) e `--scenario low` (recuperação).
-4. **Periódico:** `simulate_operational_status --all --scenario random --interval 20`; mostre as mudanças e interrompa com Ctrl+C.
+4. **Periódico:** com `DEMO_AUTO_UPDATE=true`, mostre `podman logs -f rotasaude_demo_simulator_1` e as mudanças no app a cada ciclo (pause com `podman stop rotasaude_demo_simulator_1` antes do passo 3 se quiser que o caso manual dure). Sem ele: `simulate_operational_status --all --scenario random --interval 20` e Ctrl+C.
 5. **Comparar:** selecione duas UPAs; alterne **Carro | Ônibus** e use *Calcular tempos*.
 6. **Rota:** em **Ver rota**, mostre o carro (OSRM real) e depois **Ônibus**: linha, caminhada, espera e horários.
 7. **Histórico e integridade:** `show_demo_status --unit upa-centro --history 10` mostra que nada foi sobrescrito.
@@ -292,4 +355,4 @@ cd backend && python manage.py test apps.demo   # ou: python manage.py test
 cd mobile && flutter analyze && flutter test
 ```
 
-Cobertura relevante: `apps/demo/tests/` (guarda do modo, cenários, simulador, histórico e timestamps, execução repetida, unidades reais intactas, seed idempotente, `show_demo_status`, rota de ônibus e compatibilidade de `driving`) e, no Flutter, `transit_demo_test.dart`, `operational_refresh_test.dart`, `route_parser_test.dart`, `route_repository_test.dart` e `api_contract_test.dart` (com a fixture `route_bus_simulated.json` gerada pelo backend).
+Cobertura relevante: `apps/demo/tests/` (guarda do modo, cenários, simulador, atualização automática em `test_autoupdate.py` — padrão desligado, bloqueio fora do modo, intervalo, falhas, trava entre instâncias, `SIGTERM` e estados especiais —, histórico e timestamps, execução repetida, unidades reais intactas, seed idempotente, `show_demo_status`, rota de ônibus e compatibilidade de `driving`) e, no Flutter, `transit_demo_test.dart`, `operational_refresh_test.dart`, `route_parser_test.dart`, `route_repository_test.dart` e `api_contract_test.dart` (com a fixture `route_bus_simulated.json` gerada pelo backend).

@@ -137,6 +137,11 @@ if DEMO_MODE and not DEBUG:
 # Idade a partir da qual `show_demo_status` classifica uma leitura como desatualizada.
 # Deve coincidir com OPERATIONAL_MAX_AGE_MINUTES do app Flutter (padrão 30).
 DEMO_STALE_AFTER_MINUTES = int(os.environ.get("DEMO_STALE_AFTER_MINUTES", "30"))
+# Atualização automática (`run_demo_auto_update`, processo separado da API). Desligada por padrão
+# e só funciona junto com DEMO_MODE. O intervalo (segundos) é validado pelo próprio serviço: um
+# valor inválido aqui não pode impedir a API de iniciar.
+DEMO_AUTO_UPDATE = env_bool("DEMO_AUTO_UPDATE", False)
+DEMO_UPDATE_INTERVAL = os.environ.get("DEMO_UPDATE_INTERVAL", "60")
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
     "integration": INTEGRATION_RATE_LIMIT,

@@ -20,6 +20,9 @@ class DemoUnitProfile:
     external_id: str
     role: str
     scenario: str | None = None  # cenário de partida, quando o papel é SCENARIO
+    # A atualização automática renova o cenário de partida em vez de sortear um, para que o
+    # caso que a unidade representa (ex.: demanda crítica) não desapareça da apresentação.
+    pinned: bool = False
 
     @property
     def reserved(self) -> bool:
@@ -33,7 +36,7 @@ PROFILES = {
         DemoUnitProfile("upa-centro", Role.SCENARIO, "low"),
         DemoUnitProfile("upa-sul", Role.SCENARIO, "moderate"),
         DemoUnitProfile("upa-norte", Role.SCENARIO, "high"),
-        DemoUnitProfile("upa-nordeste", Role.SCENARIO, "critical"),
+        DemoUnitProfile("upa-nordeste", Role.SCENARIO, "critical", pinned=True),
         DemoUnitProfile("upa-oeste", Role.NO_DATA),
         DemoUnitProfile("upa-leste", Role.STALE),
         DemoUnitProfile("upa-sudoeste", Role.UPDATE_FAILURE),
