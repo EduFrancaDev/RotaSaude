@@ -13,54 +13,53 @@ import 'package:rotasaude/screens/discovery/discovery_empty_results.dart';
 import 'package:rotasaude/screens/discovery/discovery_list_tab.dart';
 import 'package:rotasaude/screens/discovery/discovery_map_tab.dart';
 import 'package:rotasaude/screens/location_selection_screen.dart';
+import 'package:rotasaude/screens/origin_selection_screen.dart';
 import 'package:rotasaude/screens/route_preview_screen.dart';
 import 'package:rotasaude/screens/unit_details_screen.dart';
 import 'package:rotasaude/services/location_access.dart';
+import 'package:rotasaude/services/search_text.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
-import 'package:rotasaude/services/user_location_session_store.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 
 enum _DiscoveryTab { map, list, compare }
+
+enum _SortOrder {
+  name('Nome (A–Z)'),
+  wait('Menor espera'),
+  distance('Proximidade');
+
+  const _SortOrder(this.label);
+  final String label;
+}
 
 enum _LoadStatus { loading, loaded, failed }
 
 class MapScreen extends StatefulWidget {
   const MapScreen({
     required this.userOrigin,
+    this.initialArea,
+    this.startInList = false,
     this.userLocationAvailable = true,
     this.now,
     this.operationalRefreshInterval = const Duration(minutes: 1),
     this.repository,
     this.routeRepository,
     this.locationAccess,
-    this.sessionStore,
     this.onUserOriginChanged,
-    this.onSwitchToGps,
-    this.onChooseManualOnMap,
+    this.onAreaChanged,
     super.key,
   });
 
-  final UserLocationOrigin userOrigin;
-
-  /// Quando falso, distâncias em linha reta não são calculadas.
+  final UserLocationOrigin? userOrigin;
+  final SearchArea? initialArea;
+  final bool startInList;
   final bool userLocationAvailable;
-
   final LocationAccess? locationAccess;
-  final UserLocationSessionStore? sessionStore;
   final Future<void> Function(UserLocationOrigin origin)? onUserOriginChanged;
-  final Future<void> Function()? onSwitchToGps;
-  final Future<LatLng?> Function()? onChooseManualOnMap;
-
-  /// Relógio de referência (testes). `null` usa [DateTime.now].
+  final ValueChanged<SearchArea>? onAreaChanged;
   final DateTime Function()? now;
-
-  /// Periodicidade para reavaliar a janela operacional de 30 minutos.
   final Duration operationalRefreshInterval;
-
-  /// Fonte das unidades. Sem ela, usa a API configurada em [ApiConfig].
   final HealthUnitRepository? repository;
-
-  /// Fonte das rotas. Sem ela, usa a API configurada em [ApiConfig].
   final RouteRepository? routeRepository;
 
   @override
@@ -68,532 +67,708 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  late SearchArea? _area = SearchArea.fromCoordinate(
-    widget.userOrigin.coordinate,
-  );
-  late final HealthUnitRepository _repository =
-      widget.repository ?? ApiHealthUnitRepository();
+  late UserLocationOrigin? _origin = widget.userOrigin;
+  late SearchArea? _area = widget.initialArea ?? _suggestedArea;
+  late _DiscoveryTab _tab = widget.startInList
+      ? _DiscoveryTab.list
+      : _DiscoveryTab.map;
+  late final _repository = widget.repository ?? ApiHealthUnitRepository();
+  RouteRepository? _ownedRoutes;
+  RouteRepository get _routes =>
+      widget.routeRepository ?? (_ownedRoutes ??= ApiRouteRepository());
+
   List<HealthUnit> _units = const [];
-  late _LoadStatus _loadStatus = _area?.city == null
+  final _comparedIds = <String>[];
+  final _carMinutes = <String, int>{};
+  bool _calculatingTimes = false;
+  bool _comparisonRequestFailed = false;
+  int _comparisonRevision = 0;
+  late _LoadStatus _loadStatus = _area == null
       ? _LoadStatus.loaded
       : _LoadStatus.loading;
   HealthApiException? _failure;
   int _loadGeneration = 0;
-  _DiscoveryTab _tab = _DiscoveryTab.map;
   TravelMode _travelMode = TravelMode.car;
-  String _query = '';
   String? _serviceFilter;
-  String _sortOrder = 'Destaque';
-  bool _searchExpanded = false;
+  _SortOrder _sortOrder = _SortOrder.name;
   String? _selectedUnitId;
-  bool _mapUnitSummaryDismissed = false;
-  final TextEditingController _searchController = TextEditingController();
-  final MapController _mapController = MapController();
-  Timer? _operationalRefreshTimer;
+  bool _summaryDismissed = false;
+  final _searchController = TextEditingController();
+  MapCamera? _mapCamera;
+  PageStorageBucket _tabStorage = PageStorageBucket();
+  Timer? _operationalTimer;
+  List<HealthUnit>? _distanceUnits;
+  LatLng? _distanceOrigin;
+  Map<String, double?> _distances = const {};
 
-  LatLng? _cachedDistanceUser;
-  int _cachedDistanceUnitsGeneration = -1;
-  Map<String, double?> _straightLineKmByUnitId = const {};
+  Map<String, double?> get _distanceLookup {
+    final origin = _position;
+    if (!identical(_units, _distanceUnits) || origin != _distanceOrigin) {
+      _distanceUnits = _units;
+      _distanceOrigin = origin;
+      _distances = buildStraightLineDistanceLookup(
+        userPosition: origin,
+        units: _units,
+      );
+    }
+    return _distances;
+  }
 
-  LatLng? get _userPosition =>
-      widget.userLocationAvailable ? widget.userOrigin.coordinate : null;
-
+  LatLng? get _position =>
+      widget.userLocationAvailable ? _origin?.coordinate : null;
+  SearchArea? get _suggestedArea =>
+      _origin == null ? null : SearchArea.fromCoordinate(_origin!.coordinate);
   DateTime get _now => widget.now?.call() ?? DateTime.now();
-
-  UnitOperationalData? _operationalAt(HealthUnit unit) =>
-      unit.currentOperationalDataAt(_now);
 
   @override
   void initState() {
     super.initState();
     _loadUnits();
+    _startClock();
+  }
+
+  void _startClock() {
+    _operationalTimer?.cancel();
     final interval = widget.operationalRefreshInterval;
     if (interval > Duration.zero) {
-      _operationalRefreshTimer = Timer.periodic(interval, (_) {
-        if (mounted) setState(() {});
-      });
+      _operationalTimer = Timer.periodic(interval, (_) => setState(() {}));
     }
   }
 
   @override
   void didUpdateWidget(MapScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.userOrigin.coordinate != widget.userOrigin.coordinate ||
-        oldWidget.userOrigin.kind != widget.userOrigin.kind ||
-        oldWidget.userLocationAvailable != widget.userLocationAvailable ||
-        oldWidget.userOrigin.gpsMayBeStale != widget.userOrigin.gpsMayBeStale) {
-      _invalidateStraightLineCache();
-    }
-    if (oldWidget.userOrigin.coordinate != widget.userOrigin.coordinate) {
-      _area = SearchArea.fromCoordinate(widget.userOrigin.coordinate);
-    }
     if (oldWidget.operationalRefreshInterval !=
         widget.operationalRefreshInterval) {
-      _operationalRefreshTimer?.cancel();
-      final interval = widget.operationalRefreshInterval;
-      if (interval > Duration.zero) {
-        _operationalRefreshTimer = Timer.periodic(interval, (_) {
-          if (mounted) setState(() {});
-        });
-      }
+      _startClock();
+    }
+    final oldPosition = oldWidget.userLocationAvailable
+        ? _origin?.coordinate
+        : null;
+    if (oldWidget.userOrigin != widget.userOrigin) _origin = widget.userOrigin;
+    if (oldPosition != _position) _resetTravelTimes();
+    final suggested = _suggestedArea;
+    if (_area == null && suggested != null) {
+      _area = suggested;
+      _loadStatus = _LoadStatus.loading;
+      _loadUnits();
     }
   }
-
-  void _invalidateStraightLineCache() {
-    _cachedDistanceUser = null;
-    _cachedDistanceUnitsGeneration = -1;
-    _straightLineKmByUnitId = const {};
-  }
-
-  Map<String, double?> get _straightLineKmLookup {
-    final user = _userPosition;
-    if (_cachedDistanceUser == user &&
-        _cachedDistanceUnitsGeneration == _loadGeneration) {
-      return _straightLineKmByUnitId;
-    }
-    _cachedDistanceUser = user;
-    _cachedDistanceUnitsGeneration = _loadGeneration;
-    _straightLineKmByUnitId = buildStraightLineDistanceLookup(
-      userPosition: user,
-      units: _units,
-    );
-    return _straightLineKmByUnitId;
-  }
-
-  double? _straightLineKm(HealthUnit unit) => _straightLineKmLookup[unit.id];
 
   @override
   void dispose() {
-    _operationalRefreshTimer?.cancel();
+    _operationalTimer?.cancel();
     _searchController.dispose();
-    _mapController.dispose();
     if (widget.repository == null) _repository.close();
+    _ownedRoutes?.close();
     super.dispose();
   }
 
-  /// Consulta as unidades da área atual. O chamador marca o estado de
-  /// carregamento antes; respostas de consultas substituídas são ignoradas.
+  void _resetTravelTimes() {
+    _comparisonRevision++;
+    _calculatingTimes = false;
+    _comparisonRequestFailed = false;
+    _carMinutes.clear();
+  }
+
   Future<void> _loadUnits() async {
     final generation = ++_loadGeneration;
     final city = _area?.city;
     if (city == null) return;
-    HealthApiException? failure;
-    List<HealthUnit> units = const [];
     try {
-      units = await _repository.fetchUnits(city: city);
-    } on HealthApiException catch (error) {
-      failure = error;
+      final units = await _repository.fetchUnits(city: city);
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _units = units;
+        _comparedIds.removeWhere((id) => !units.any((unit) => unit.id == id));
+        _loadStatus = _LoadStatus.loaded;
+        _failure = null;
+      });
     } on Exception catch (error) {
-      failure = HealthApiException(
-        HealthApiFailureKind.invalidResponse,
-        'Falha inesperada: $error',
-      );
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _failure = error is HealthApiException
+            ? error
+            : const HealthApiException(
+                HealthApiFailureKind.invalidResponse,
+                'Resposta inválida.',
+              );
+        _loadStatus = _LoadStatus.failed;
+      });
     }
-    if (!mounted || generation != _loadGeneration) return;
-    setState(() {
-      _failure = failure;
-      _units = units;
-      _invalidateStraightLineCache();
-      _loadStatus = failure == null ? _LoadStatus.loaded : _LoadStatus.failed;
-      if (!units.any((unit) => unit.id == _selectedUnitId)) {
-        _selectedUnitId = units.firstOrNull?.id;
-        _mapUnitSummaryDismissed = false;
-      }
-    });
   }
 
   void _retryLoad() {
-    setState(() {
-      _loadStatus = _LoadStatus.loading;
-      _failure = null;
-    });
+    setState(() => _loadStatus = _LoadStatus.loading);
     _loadUnits();
   }
 
-  List<HealthUnit> get _visibleUnits {
-    final query = _query.trim().toLowerCase();
-    final units = _units.where((unit) {
-      final matchesQuery =
+  Future<void> _chooseArea() async {
+    final area = await Navigator.of(context).push<SearchArea>(
+      MaterialPageRoute(
+        builder: (_) => LocationSelectionScreen(currentArea: _area),
+      ),
+    );
+    if (!mounted || area == null || area.id == _area?.id) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _area = area;
+      _tab = _DiscoveryTab.list;
+      _units = const [];
+      _comparedIds.clear();
+      _selectedUnitId = null;
+      _summaryDismissed = false;
+      _mapCamera = null;
+      _tabStorage = PageStorageBucket();
+      _resetTravelTimes();
+      _loadStatus = _LoadStatus.loading;
+    });
+    widget.onAreaChanged?.call(area);
+    _loadUnits();
+  }
+
+  Future<UserLocationOrigin?> _chooseOrigin() async {
+    final origin = await Navigator.of(context).push<UserLocationOrigin>(
+      MaterialPageRoute(
+        builder: (_) => OriginSelectionScreen(
+          locationAccess: widget.locationAccess ?? const DeviceLocationAccess(),
+          mapCenter: _origin?.coordinate ?? _area?.center,
+        ),
+      ),
+    );
+    if (!mounted || origin == null) return null;
+    setState(() {
+      if (_origin?.coordinate != origin.coordinate) _resetTravelTimes();
+      _origin = origin;
+    });
+    await widget.onUserOriginChanged?.call(origin);
+    return origin;
+  }
+
+  Future<void> _changeSort(_SortOrder order) async {
+    if (order == _SortOrder.distance && _position == null) {
+      if (await _chooseOrigin() == null || !mounted) return;
+    }
+    setState(() => _sortOrder = order);
+  }
+
+  void _searchUpdated() => setState(() => _summaryDismissed = false);
+
+  void _setService(String? value) => setState(() {
+    _serviceFilter = value;
+    _summaryDismissed = false;
+  });
+
+  Future<void> _toggleComparison(HealthUnit unit) async {
+    if (_comparedIds.contains(unit.id)) {
+      setState(() => _comparedIds.remove(unit.id));
+      return;
+    }
+    if (_comparedIds.length < 2) {
+      setState(() => _comparedIds.add(unit.id));
+      return;
+    }
+    final selected = _selectedForComparison;
+    final replaced = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('Substituir unidade'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Qual unidade você quer substituir por ${unit.name}?'),
+            const SizedBox(height: 10),
+            for (final old in selected)
+              OutlinedButton(
+                onPressed: () => Navigator.pop(context, old.id),
+                child: Text(old.name),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || replaced == null) return;
+    final index = _comparedIds.indexOf(replaced);
+    if (index != -1) setState(() => _comparedIds[index] = unit.id);
+  }
+
+  List<HealthUnit> get _selectedForComparison => [
+    for (final id in _comparedIds) _units.firstWhere((unit) => unit.id == id),
+  ];
+
+  Future<void> _calculateComparisonTimes() async {
+    if (_calculatingTimes) return;
+    final origin = _position ?? (await _chooseOrigin())?.coordinate;
+    if (!mounted || origin == null || _calculatingTimes) return;
+    final missing = _selectedForComparison
+        .where(
+          (unit) =>
+              !_carMinutes.containsKey(unit.id) &&
+              isValidGeographicPosition(unit.position),
+        )
+        .toList();
+    if (missing.isEmpty) return;
+    final revision = ++_comparisonRevision;
+    setState(() {
+      _calculatingTimes = true;
+      _comparisonRequestFailed = false;
+    });
+    for (final (index, unit) in missing.indexed) {
+      // O provedor público impõe um intervalo entre chamadas sem cache.
+      if (index > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
+      }
+      if (!mounted || revision != _comparisonRevision) return;
+      if (!_comparedIds.contains(unit.id)) continue;
+      try {
+        final route = await _routes.fetchDrivingRoute(
+          origin: origin,
+          unitId: unit.id,
+        );
+        if (!mounted || revision != _comparisonRevision) return;
+        setState(() => _carMinutes[unit.id] = route.durationMinutes);
+      } on Exception {
+        if (!mounted || revision != _comparisonRevision) return;
+        setState(() => _comparisonRequestFailed = true);
+      }
+    }
+    if (mounted && revision == _comparisonRevision) {
+      setState(() => _calculatingTimes = false);
+    }
+  }
+
+  void _showDetails(HealthUnit unit, double? distance) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => UnitDetailsScreen(
+          unit: unit,
+          straightLineKm: distance,
+          now: widget.now,
+          onRoute: () => _showRoute(unit),
+        ),
+      ),
+    );
+  }
+
+  void _showRoute(HealthUnit unit) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => RoutePreviewScreen(
+          unit: unit,
+          initialOrigin: _position == null ? null : _origin,
+          routeRepository: _routes,
+          onChooseOrigin: _chooseOrigin,
+          onCalculated: (origin, route) {
+            if (mounted && _position == origin) {
+              setState(() => _carMinutes[unit.id] = route.durationMinutes);
+            }
+          },
+          now: widget.now,
+        ),
+      ),
+    );
+  }
+
+  void _selectTab(_DiscoveryTab tab) {
+    if (_tab == tab) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _tab = tab);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = _now;
+    final query = normalizedSearchText(_searchController.text);
+    final matchingQuery = _units.where(
+      (unit) =>
           query.isEmpty ||
-          unit.name.toLowerCase().contains(query) ||
-          unit.services.any((service) => service.toLowerCase().contains(query));
-      final matchesService =
-          _serviceFilter == null || unit.services.contains(_serviceFilter);
-      return matchesQuery && matchesService;
-    }).toList();
-    final distances = _straightLineKmLookup;
-    if (_sortOrder == 'Menor espera') {
-      units.sort((a, b) {
-        final aWait = _operationalAt(a)?.waitMinutes;
-        final bWait = _operationalAt(b)?.waitMinutes;
-        if (aWait == null && bWait == null) return a.name.compareTo(b.name);
-        if (aWait == null) return 1;
-        if (bWait == null) return -1;
-        return aWait.compareTo(bWait);
-      });
-    } else if (_sortOrder == 'Proximidade') {
-      units.sort(
-        (a, b) => compareUnitsByStraightLineDistance(
+          normalizedSearchText(unit.name).contains(query) ||
+          unit.services.any(
+            (service) => normalizedSearchText(service).contains(query),
+          ),
+    );
+    final visible = matchingQuery
+        .where(
+          (unit) =>
+              _serviceFilter == null || unit.services.contains(_serviceFilter),
+        )
+        .toList();
+    final distances = _distanceLookup;
+    int byName(HealthUnit a, HealthUnit b) =>
+        normalizedSearchText(a.name).compareTo(normalizedSearchText(b.name));
+    visible.sort(
+      (a, b) => switch (_sortOrder) {
+        _SortOrder.wait =>
+          (a.currentOperationalDataAt(now)?.waitMinutes ?? double.infinity)
+              .compareTo(
+                b.currentOperationalDataAt(now)?.waitMinutes ?? double.infinity,
+              )
+              .thenBy(() => byName(a, b)),
+        _SortOrder.distance => compareUnitsByStraightLineDistance(
           a,
           distances[a.id],
           b,
           distances[b.id],
         ),
-      );
-    }
-    return units;
-  }
-
-  void _keepSelectionVisible() {
-    final units = _visibleUnits;
-    if (units.any((unit) => unit.id == _selectedUnitId)) return;
-    _selectedUnitId = units.firstOrNull?.id;
-    _mapUnitSummaryDismissed = false;
-  }
-
-  List<String> get _services =>
-      _units.expand((unit) => unit.services).toSet().toList()..sort();
-
-  Future<void> _chooseArea() async {
-    final area = await Navigator.of(context).push<SearchArea>(
-      MaterialPageRoute<SearchArea>(
-        builder: (_) => LocationSelectionScreen(currentArea: _area),
-      ),
+        _SortOrder.name => byName(a, b),
+      },
     );
-    if (!mounted || area == null) return;
-    setState(() {
-      _area = area;
-      _units = const [];
-      _invalidateStraightLineCache();
-      _failure = null;
-      _loadStatus = area.city == null
-          ? _LoadStatus.loaded
-          : _LoadStatus.loading;
-      _selectedUnitId = null;
-      _query = '';
-      _serviceFilter = null;
-      _searchController.clear();
-    });
-    _loadUnits();
-  }
-
-  Future<void> _showDetails(HealthUnit unit) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => UnitDetailsScreen(
-          unit: unit,
-          straightLineKm: _straightLineKm(unit),
-          operationalNow: _now,
-          onRoute: _operationalAt(unit) == null
-              ? null
-              : (mode) => _showRoute(unit, mode),
-        ),
+    final unitsState = _unitsState(matchingQuery.isEmpty, visible.isEmpty);
+    final compared = _selectedForComparison;
+    final selectedUnit =
+        visible.where((unit) => unit.id == _selectedUnitId).firstOrNull ??
+        visible.firstOrNull;
+    final services = {
+      ..._units.expand((unit) => unit.services),
+      ?_serviceFilter,
+    }.toList()..sort();
+    final searchedServices = query.isEmpty
+        ? const <String>[]
+        : services
+              .where((service) => normalizedSearchText(service).contains(query))
+              .toList();
+    final comparedService =
+        _serviceFilter ??
+        (searchedServices.length == 1 ? searchedServices.single : null);
+    final header = _DiscoveryControls(
+      area: _area,
+      origin: _position == null ? null : _origin,
+      showOrigin: _tab == _DiscoveryTab.map || _tab == _DiscoveryTab.compare,
+      onCity: _chooseArea,
+      onOrigin: _chooseOrigin,
+      onLegend: () => Navigator.of(context).push<void>(
+        MaterialPageRoute(builder: (_) => const AvailabilityScreen()),
       ),
+      searchController: _searchController,
+      onQuery: _searchUpdated,
+      selectedService: _serviceFilter,
+      services: services,
+      onService: _setService,
+      sort: _tab == _DiscoveryTab.list ? _sortOrder : null,
+      onSort: _changeSort,
     );
-  }
-
-  Future<void> _showRoute(HealthUnit unit, TravelMode mode) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => RoutePreviewScreen(
-          unit: unit,
-          initialMode: mode,
-          initialOrigin: widget.userOrigin.coordinate,
-          originKind: widget.userOrigin.kind,
-          routeRepository: widget.routeRepository,
-          locationAccess: widget.locationAccess,
-          onChooseManualOrigin: widget.onChooseManualOnMap,
-          onSwitchToGps: widget.onSwitchToGps,
-        ),
-      ),
-    );
-  }
-
-  void _selectTab(int index) {
-    setState(() => _tab = _DiscoveryTab.values[index]);
-  }
-
-  void _toggleSearch() {
-    if (_searchExpanded) FocusScope.of(context).unfocus();
-    setState(() => _searchExpanded = !_searchExpanded);
-  }
-
-  void _clearFilters() {
-    setState(() {
-      _query = '';
-      _searchController.clear();
-      _serviceFilter = null;
-    });
-  }
-
-  void _selectListUnit(String unitId) {
-    setState(() => _selectedUnitId = unitId);
-  }
-
-  void _updateServiceFilter(String? service) {
-    setState(() {
-      _serviceFilter = service;
-      _keepSelectionVisible();
-    });
-  }
-
-  void _selectMapUnit(String unitId) {
-    setState(() {
-      if (_selectedUnitId != unitId) {
-        _selectedUnitId = unitId;
-        _mapUnitSummaryDismissed = false;
-      }
-    });
-  }
-
-  void _dismissMapUnitSummary() {
-    setState(() => _mapUnitSummaryDismissed = true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
+    final emptyWithNoCity = _area == null ? unitsState : null;
+    final body = switch (_tab) {
+      _DiscoveryTab.map => LayoutBuilder(
+        builder: (context, constraints) => Column(
           children: [
-            if (widget.userOrigin.isDeviceGps &&
-                widget.userOrigin.gpsMayBeStale)
-              const _StalePositionNotice(),
-            if (_tab == _DiscoveryTab.map)
-              _DiscoveryHeader(
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * .54,
+              ),
+              child: SingleChildScrollView(child: header),
+            ),
+            Expanded(
+              child: DiscoveryMapTab(
                 area: _area,
-                userOrigin: widget.userOrigin,
-                onChooseArea: _chooseArea,
-                onShowAvailability: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const AvailabilityScreen(),
-                  ),
-                ),
-                onSwitchToGps: widget.onSwitchToGps,
-                onChooseManualOnMap: widget.onChooseManualOnMap,
+                userOrigin: _position == null ? null : _origin,
+                initialCamera: _mapCamera,
+                onMapEvent: (event) => _mapCamera = event.camera,
+                units: visible,
+                state: unitsState,
+                selectedUnitId: selectedUnit?.id,
+                summaryUnit: _summaryDismissed ? null : selectedUnit,
+                straightLineKmByUnitId: distances,
+                carMinutes: _carMinutes,
+                now: now,
+                onSelectUnit: (id) => setState(() {
+                  _selectedUnitId = id;
+                  _summaryDismissed = false;
+                }),
+                onDismissSummary: () =>
+                    setState(() => _summaryDismissed = true),
+                onDetails: (unit) => _showDetails(unit, distances[unit.id]),
               ),
-            if (_tab == _DiscoveryTab.map ||
-                _searchExpanded ||
-                _query.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (value) => setState(() {
-                    _query = value;
-                    _keepSelectionVisible();
-                  }),
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: 'Busque unidade ou atendimento',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Limpar busca',
-                            onPressed: () => setState(() {
-                              _searchController.clear();
-                              _query = '';
-                              if (_tab != _DiscoveryTab.map) {
-                                _searchExpanded = false;
-                              }
-                            }),
-                            icon: const Icon(Icons.close),
-                          ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: AppColors.border),
-                    ),
-                  ),
-                ),
-              ),
-            Expanded(child: _buildTab()),
-            NavigationBar(
-              selectedIndex: _tab.index,
-              onDestinationSelected: _selectTab,
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.map_outlined),
-                  selectedIcon: Icon(Icons.map),
-                  label: 'Mapa',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.format_list_bulleted),
-                  label: 'Lista',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.compare_arrows),
-                  label: 'Comparar',
-                ),
-              ],
             ),
           ],
         ),
       ),
+      _DiscoveryTab.list => DiscoveryListTab(
+        header: header,
+        units: visible,
+        state: unitsState,
+        now: now,
+        distances: distances,
+        carMinutes: _carMinutes,
+        compared: compared,
+        serviceFilter: _serviceFilter,
+        onComparison: _toggleComparison,
+        onDetails: (unit) => _showDetails(unit, distances[unit.id]),
+      ),
+      _DiscoveryTab.compare => DiscoveryComparisonTab(
+        header: header,
+        units: compared,
+        visibleIds: visible.map((unit) => unit.id).toSet(),
+        state:
+            emptyWithNoCity ??
+            (_loadStatus != _LoadStatus.loaded ? unitsState : null),
+        now: now,
+        distances: distances,
+        carMinutes: _carMinutes,
+        serviceFilter: comparedService,
+        travelMode: _travelMode,
+        hasOrigin: _position != null,
+        calculating: _calculatingTimes,
+        calculationFailed: _comparisonRequestFailed,
+        onCalculate: _calculateComparisonTimes,
+        onChooseOrigin: _chooseOrigin,
+        onMode: (mode) => setState(() => _travelMode = mode),
+        onSelectUnits: () => _selectTab(_DiscoveryTab.list),
+        onRemove: _toggleComparison,
+        onDetails: (unit) => _showDetails(unit, distances[unit.id]),
+      ),
+    };
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: PageStorage(
+          key: ValueKey(_area?.id),
+          bucket: _tabStorage,
+          child: body,
+        ),
+      ),
+      bottomNavigationBar: keyboard
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_tab == _DiscoveryTab.list && compared.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.tonal(
+                        onPressed: () => _selectTab(_DiscoveryTab.compare),
+                        child: Text('Comparar (${compared.length}/2)'),
+                      ),
+                    ),
+                  ),
+                NavigationBar(
+                  selectedIndex: _tab.index,
+                  onDestinationSelected: (index) =>
+                      _selectTab(_DiscoveryTab.values[index]),
+                  destinations: const [
+                    NavigationDestination(
+                      icon: Icon(Icons.map_outlined),
+                      selectedIcon: Icon(Icons.map),
+                      label: 'Mapa',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.format_list_bulleted),
+                      label: 'Lista',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.compare_arrows),
+                      label: 'Comparar',
+                    ),
+                  ],
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _buildTab() {
-    final loadState = _buildLoadState();
-    final units = _visibleUnits;
-    final now = _now;
-    final distances = _straightLineKmLookup;
-    final searchAction = _query.isEmpty && _tab != _DiscoveryTab.map
-        ? IconButton(
-            tooltip: _searchExpanded ? 'Fechar busca' : 'Buscar unidade',
-            onPressed: _toggleSearch,
-            icon: Icon(_searchExpanded ? Icons.close : Icons.search),
-          )
-        : null;
-    return switch (_tab) {
-      _DiscoveryTab.map =>
-        loadState ??
-            DiscoveryMapTab(
-              area: _area,
-              userOrigin: widget.userOrigin,
-              mapController: _mapController,
-              units: units,
-              hasUnits: _units.isNotEmpty,
-              selectedUnitId: _selectedUnitId,
-              summaryUnit: _mapUnitSummaryDismissed
-                  ? null
-                  : units
-                        .where((unit) => unit.id == _selectedUnitId)
-                        .firstOrNull,
-              straightLineKmByUnitId: distances,
-              now: now,
-              onSelectUnit: _selectMapUnit,
-              onDismissSummary: _dismissMapUnitSummary,
-              onDetails: _showDetails,
-              onChooseArea: _chooseArea,
-              onClearFilters: _clearFilters,
-            ),
-      _DiscoveryTab.list => DiscoveryListTab(
-        area: _area,
-        units: units,
-        hasUnits: _units.isNotEmpty,
-        loadState: loadState,
-        straightLineKmByUnitId: distances,
-        now: now,
-        selectedUnitId: _selectedUnitId,
-        searchAction: searchAction,
-        services: _services,
-        serviceFilter: _serviceFilter,
-        sortOrder: _sortOrder,
-        onChooseArea: _chooseArea,
-        onSelectUnit: _selectListUnit,
-        onDetails: _showDetails,
-        onClearFilters: _clearFilters,
-        onServiceFilterChanged: _updateServiceFilter,
-        onSortOrderChanged: (order) => setState(() => _sortOrder = order),
-      ),
-      _DiscoveryTab.compare => DiscoveryComparisonTab(
-        units: units,
-        loadState: loadState,
-        straightLineKmByUnitId: distances,
-        now: now,
-        selectedUnitId: _selectedUnitId,
-        searchAction: searchAction,
-        travelMode: _travelMode,
-        onChooseArea: _chooseArea,
-        onSelectUnit: _selectListUnit,
-        onDetails: _showDetails,
-        onTravelModeChanged: (mode) => setState(() => _travelMode = mode),
-      ),
-    };
+  Widget? _unitsState(bool noQueryMatches, bool noVisibleUnits) {
+    if (_area == null) {
+      return DiscoveryEmptyResults(
+        title: 'Escolha uma cidade para consultar unidades',
+        message: 'Veja as cidades atendidas pelo RotaSaúde.',
+        actionLabel: 'Escolher cidade',
+        onAction: _chooseArea,
+      );
+    }
+    if (_loadStatus == _LoadStatus.loading) return const _LoadingUnits();
+    if (_loadStatus == _LoadStatus.failed) {
+      return _LoadFailure(
+        kind: _failure?.kind ?? HealthApiFailureKind.connection,
+        onRetry: _retryLoad,
+      );
+    }
+    if (_units.isEmpty) {
+      return DiscoveryEmptyResults(
+        title: 'Nenhuma unidade cadastrada nesta cidade',
+        message: 'Busque em outra cidade atendida pelo RotaSaúde.',
+        actionLabel: 'Trocar cidade',
+        onAction: _chooseArea,
+      );
+    }
+    if (noVisibleUnits && noQueryMatches) {
+      return DiscoveryEmptyResults(
+        title: 'Nenhuma unidade encontrada',
+        message: 'Tente outro nome de unidade ou serviço.',
+        icon: Icons.search_off,
+        actionLabel: 'Limpar busca',
+        onAction: () {
+          _searchController.clear();
+          _searchUpdated();
+        },
+      );
+    }
+    final filter = _serviceFilter;
+    if (noVisibleUnits && filter != null) {
+      return DiscoveryEmptyResults(
+        title: 'Nenhuma unidade para este filtro',
+        message: 'Os resultados da consulta não incluem $filter.',
+        icon: Icons.filter_list_off,
+        actionLabel: 'Remover filtro de $filter',
+        onAction: () => _setService(null),
+      );
+    }
+    return null;
   }
-
-  /// Carregamento ou falha da consulta; `null` quando há resultado a mostrar.
-  Widget? _buildLoadState() => switch (_loadStatus) {
-    _LoadStatus.loading => const _LoadingUnits(),
-    _LoadStatus.failed => _LoadFailure(
-      kind: _failure?.kind ?? HealthApiFailureKind.connection,
-      onRetry: _retryLoad,
-    ),
-    _LoadStatus.loaded => null,
-  };
 }
 
-class _DiscoveryHeader extends StatelessWidget {
-  const _DiscoveryHeader({
+extension on int {
+  int thenBy(int Function() other) => this == 0 ? other() : this;
+}
+
+class _DiscoveryControls extends StatelessWidget {
+  const _DiscoveryControls({
     required this.area,
-    required this.userOrigin,
-    required this.onChooseArea,
-    required this.onShowAvailability,
-    this.onSwitchToGps,
-    this.onChooseManualOnMap,
+    required this.origin,
+    required this.showOrigin,
+    required this.onCity,
+    required this.onOrigin,
+    required this.onLegend,
+    required this.searchController,
+    required this.onQuery,
+    required this.selectedService,
+    required this.services,
+    required this.onService,
+    required this.sort,
+    required this.onSort,
   });
 
   final SearchArea? area;
-  final UserLocationOrigin userOrigin;
-  final VoidCallback onChooseArea;
-  final VoidCallback onShowAvailability;
-  final Future<void> Function()? onSwitchToGps;
-  final Future<LatLng?> Function()? onChooseManualOnMap;
+  final UserLocationOrigin? origin;
+  final bool showOrigin;
+  final VoidCallback onCity;
+  final VoidCallback onOrigin;
+  final VoidCallback onLegend;
+  final TextEditingController searchController;
+  final VoidCallback onQuery;
+  final String? selectedService;
+  final List<String> services;
+  final ValueChanged<String?> onService;
+  final _SortOrder? sort;
+  final ValueChanged<_SortOrder> onSort;
 
   @override
   Widget build(BuildContext context) {
+    final name = area?.city;
+    final city = name == null ? 'Escolher cidade' : 'Buscando em $name';
+    final source = origin;
+    final originArea = source == null
+        ? null
+        : SearchArea.fromCoordinate(source.coordinate)?.city;
+    final originLabel = source == null
+        ? 'Definir ponto de partida'
+        : source.isManual
+        ? 'Saindo de ${originArea ?? 'um ponto no mapa'} · ponto manual'
+        : 'Saindo de ${originArea ?? 'minha localização'} · GPS';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 12, 4),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'RotaSaúde',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: AppColors.navy,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onChooseArea,
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: onCity,
                   style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(48, 42),
                     alignment: Alignment.centerLeft,
+                    padding: EdgeInsets.zero,
                   ),
-                  icon: const Icon(Icons.place_outlined, size: 18),
-                  label: Text(area?.name ?? 'Escolher cidade'),
+                  icon: const Icon(Icons.place_outlined),
+                  label: Text(city),
                 ),
-                if (onSwitchToGps != null || onChooseManualOnMap != null)
-                  TextButton.icon(
-                    onPressed: userOrigin.isManual
-                        ? onSwitchToGps
-                        : onChooseManualOnMap,
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(48, 40),
-                      alignment: Alignment.centerLeft,
-                    ),
-                    icon: Icon(
-                      userOrigin.isManual
-                          ? Icons.my_location_outlined
-                          : Icons.edit_location_alt_outlined,
-                      size: 18,
-                    ),
-                    label: Text(
-                      userOrigin.isManual
-                          ? 'Usar GPS do aparelho'
-                          : 'Escolher ponto no mapa',
-                    ),
-                  ),
+              ),
+              IconButton(
+                tooltip: 'Entenda os indicadores de disponibilidade',
+                onPressed: onLegend,
+                icon: const Icon(Icons.info_outline, color: AppColors.blue),
+              ),
+            ],
+          ),
+          if (showOrigin || source != null)
+            Wrap(
+              children: [
+                TextButton.icon(
+                  onPressed: onOrigin,
+                  icon: const Icon(Icons.trip_origin, size: 18),
+                  label: Text(originLabel),
+                ),
               ],
             ),
+          if (source?.gpsMayBeStale ?? false)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('Usando a última posição conhecida.'),
+            ),
+          TextField(
+            controller: searchController,
+            onChanged: (_) => onQuery(),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              labelText: 'Buscar unidade ou serviço',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: searchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Limpar busca',
+                      onPressed: () {
+                        searchController.clear();
+                        onQuery();
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+            ),
           ),
-          IconButton(
-            tooltip: 'Entenda os indicadores de disponibilidade',
-            onPressed: onShowAvailability,
-            icon: const Icon(Icons.info_outline),
-            color: AppColors.blue,
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              PopupMenuButton<String>(
+                tooltip: 'Filtrar por serviço',
+                onSelected: (value) => onService(value.isEmpty ? null : value),
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: '',
+                    child: Text('Todos os serviços'),
+                  ),
+                  for (final service in services)
+                    PopupMenuItem(value: service, child: Text(service)),
+                ],
+                child: _ControlChip(
+                  icon: Icons.tune,
+                  label: selectedService ?? 'Serviços',
+                  active: selectedService != null,
+                ),
+              ),
+              if (sort case final order?)
+                PopupMenuButton<_SortOrder>(
+                  tooltip: 'Ordenar unidades',
+                  initialValue: order,
+                  onSelected: onSort,
+                  itemBuilder: (_) => [
+                    for (final option in _SortOrder.values)
+                      PopupMenuItem(value: option, child: Text(option.label)),
+                  ],
+                  child: _ControlChip(icon: Icons.sort, label: order.label),
+                ),
+            ],
           ),
         ],
       ),
@@ -601,35 +776,39 @@ class _DiscoveryHeader extends StatelessWidget {
   }
 }
 
-class _StalePositionNotice extends StatelessWidget {
-  const _StalePositionNotice();
+class _ControlChip extends StatelessWidget {
+  const _ControlChip({
+    required this.icon,
+    required this.label,
+    this.active = false,
+  });
+  final IconData icon;
+  final String label;
+  final bool active;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-      child: Material(
-        color: const Color(0xFFFFF8E6),
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.schedule, size: 18, color: AppColors.muted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Sua localização pode estar desatualizada.',
-                  style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: AppColors.navy, height: 1.3),
-                ),
-              ),
-            ],
-          ),
+  Widget build(BuildContext context) => Semantics(
+    selected: active ? true : null,
+    child: Container(
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: ShapeDecoration(
+        color: active ? const Color(0xFFEAF4FA) : Colors.white,
+        shape: StadiumBorder(
+          side: BorderSide(color: active ? AppColors.blue : AppColors.border),
         ),
       ),
-    );
-  }
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: AppColors.blue),
+          const SizedBox(width: 6),
+          Flexible(child: Text(label)),
+          const Icon(Icons.arrow_drop_down, size: 20),
+        ],
+      ),
+    ),
+  );
 }
 
 class _LoadingUnits extends StatelessWidget {

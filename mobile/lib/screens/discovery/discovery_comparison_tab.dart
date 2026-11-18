@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:rotasaude/models/health_unit.dart';
-import 'package:rotasaude/screens/discovery/discovery_empty_results.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/theme/app_theme.dart';
@@ -8,220 +7,287 @@ import 'package:rotasaude/widgets/unit_ui.dart';
 
 class DiscoveryComparisonTab extends StatelessWidget {
   const DiscoveryComparisonTab({
+    required this.header,
     required this.units,
-    required this.loadState,
-    required this.straightLineKmByUnitId,
+    required this.visibleIds,
+    required this.state,
     required this.now,
-    required this.selectedUnitId,
-    required this.searchAction,
-    required this.onChooseArea,
-    required this.onSelectUnit,
-    required this.onDetails,
+    required this.distances,
+    required this.carMinutes,
+    required this.serviceFilter,
     required this.travelMode,
-    required this.onTravelModeChanged,
+    required this.hasOrigin,
+    required this.calculating,
+    required this.calculationFailed,
+    required this.onCalculate,
+    required this.onChooseOrigin,
+    required this.onMode,
+    required this.onSelectUnits,
+    required this.onRemove,
+    required this.onDetails,
     super.key,
   });
 
+  final Widget header;
   final List<HealthUnit> units;
-  final Widget? loadState;
-  final Map<String, double?> straightLineKmByUnitId;
+  final Set<String> visibleIds;
+  final Widget? state;
   final DateTime now;
-  final String? selectedUnitId;
-  final Widget? searchAction;
-  final VoidCallback onChooseArea;
-  final ValueChanged<String> onSelectUnit;
-  final ValueChanged<HealthUnit> onDetails;
+  final Map<String, double?> distances;
+  final Map<String, int> carMinutes;
+  final String? serviceFilter;
   final TravelMode travelMode;
-  final ValueChanged<TravelMode> onTravelModeChanged;
+  final bool hasOrigin;
+  final bool calculating;
+  final bool calculationFailed;
+  final VoidCallback onCalculate;
+  final VoidCallback onChooseOrigin;
+  final ValueChanged<TravelMode> onMode;
+  final VoidCallback onSelectUnits;
+  final ValueChanged<HealthUnit> onRemove;
+  final ValueChanged<HealthUnit> onDetails;
 
   @override
   Widget build(BuildContext context) {
-    final loadingOrFailure = loadState;
-    final Widget body;
-    if (loadingOrFailure != null) {
-      body = loadingOrFailure;
-    } else if (units.isEmpty) {
-      body = const DiscoveryEmptyResults(
-        title: 'Nenhuma unidade para comparar',
-        message: 'Altere a cidade ou os filtros da lista.',
-      );
-    } else {
-      body = ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
-        itemCount: units.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 10),
-        itemBuilder: (context, index) {
-          final unit = units[index];
-          return _ComparisonCard(
-            unit: unit,
-            operational: unit.currentOperationalDataAt(now),
-            straightLineKm: straightLineKmByUnitId[unit.id],
-            now: now,
-            mode: travelMode,
-            selected: selectedUnitId == unit.id,
-            onSelect: () => onSelectUnit(unit.id),
-            onDetails: () => onDetails(unit),
-          );
-        },
-      );
-    }
-    return Column(
+    final theme = Theme.of(context).textTheme;
+    final byBus = travelMode == TravelMode.bus;
+    final routable = units.where(
+      (unit) => isValidGeographicPosition(unit.position),
+    );
+    final needsCarTimes = routable.any(
+      (unit) => !carMinutes.containsKey(unit.id),
+    );
+    return ListView(
+      key: const PageStorageKey('discovery-comparison-scroll'),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.only(bottom: 16),
       children: [
+        header,
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Comparar unidades',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.navy,
-                        fontWeight: FontWeight.w700,
+              Text('Comparar unidades', style: theme.titleLarge),
+              const SizedBox(height: 12),
+              if (state case final current?)
+                current
+              else if (units.length < 2) ...[
+                Text('Selecione duas unidades na Lista para comparar.'),
+                if (units.firstOrNull case final unit?)
+                  InputChip(
+                    label: Text(unit.name),
+                    onDeleted: () => onRemove(unit),
+                    deleteButtonTooltipMessage:
+                        'Remover ${unit.name} da comparação',
+                  ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: onSelectUnits,
+                  child: const Text('Selecionar unidades'),
+                ),
+              ] else ...[
+                if (units.any((unit) => !visibleIds.contains(unit.id))) ...[
+                  Text(
+                    'Uma ou mais unidades selecionadas estão fora dos filtros atuais.',
+                    style: theme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (units.any((unit) => unit.isDemo)) ...[
+                  const IllustrativeNotice(compact: true, short: true),
+                  const SizedBox(height: 8),
+                ],
+                _ComparisonRow(
+                  units: units,
+                  cell: (unit) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        unit.name,
+                        style: theme.titleSmall?.copyWith(
+                          color: AppColors.navy,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => onRemove(unit),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          alignment: Alignment.centerLeft,
+                        ),
+                        child: Semantics(
+                          label: 'Remover ${unit.name} da comparação',
+                          excludeSemantics: true,
+                          child: const Text('Remover'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SegmentedButton<TravelMode>(
+                    style: AppTheme.primarySegmentedButtonStyle,
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(
+                        value: TravelMode.car,
+                        label: Text('Carro'),
+                      ),
+                      ButtonSegment(
+                        value: TravelMode.bus,
+                        label: Text('Ônibus'),
+                      ),
+                    ],
+                    selected: {travelMode},
+                    onSelectionChanged: (value) => onMode(value.single),
+                  ),
+                ),
+                if (byBus) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Tempo de ônibus indisponível para estas unidades.',
+                  ),
+                  if (!hasOrigin)
+                    TextButton(
+                      onPressed: onChooseOrigin,
+                      child: const Text('Definir ponto de partida'),
+                    ),
+                ],
+                const SizedBox(height: 8),
+                _ComparisonRow(
+                  label: serviceFilter == null
+                      ? 'Serviços cadastrados'
+                      : 'Serviço procurado',
+                  units: units,
+                  cell: (unit) => Text(switch (serviceFilter) {
+                    final service? =>
+                      unit.services.contains(service)
+                          ? service
+                          : '$service não cadastrado',
+                    null =>
+                      unit.services.isEmpty
+                          ? 'Sem serviços cadastrados'
+                          : unit.services.join(' · '),
+                  }),
+                ),
+                _ComparisonRow(
+                  label: 'Espera estimada',
+                  units: units,
+                  cell: (unit) => UnitWaitEstimate(
+                    unit: unit,
+                    now: now,
+                    showUpdate: true,
+                    showLabel: false,
+                  ),
+                ),
+                _ComparisonRow(
+                  label: 'Distância em linha reta',
+                  units: units,
+                  cell: (unit) => Text(
+                    hasOrigin
+                        ? formatStraightLineDistanceValue(distances[unit.id])
+                        : 'Sem ponto de partida',
+                  ),
+                ),
+                if (!byBus) ...[
+                  _ComparisonRow(
+                    label: 'Tempo de carro',
+                    units: units,
+                    cell: (unit) {
+                      final minutes = carMinutes[unit.id];
+                      return Text(
+                        minutes != null ? '$minutes min' : 'Sem estimativa',
+                      );
+                    },
+                  ),
+                  if (needsCarTimes || !hasOrigin)
+                    OutlinedButton.icon(
+                      onPressed: calculating ? null : onCalculate,
+                      icon: const Icon(Icons.directions_car_outlined),
+                      label: Text(
+                        calculating
+                            ? 'Calculando tempos…'
+                            : calculationFailed
+                            ? 'Tentar calcular novamente'
+                            : hasOrigin
+                            ? 'Calcular tempos de carro'
+                            : 'Definir ponto de partida',
                       ),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: 'Alterar localização consultada',
-                    onPressed: onChooseArea,
-                    icon: const Icon(Icons.place_outlined),
-                  ),
-                  ?searchAction,
+                  if (calculationFailed)
+                    const Text(
+                      'Alguns tempos de carro não puderam ser calculados.',
+                    ),
                 ],
-              ),
-              Text(
-                'Compare espera, deslocamento e atendimento',
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: AppColors.muted),
-              ),
-              if (units.any((unit) => unit.isDemo)) ...[
-                const SizedBox(height: 4),
-                const IllustrativeNotice(compact: true, short: true),
+                const SizedBox(height: 8),
+                _ComparisonRow(
+                  units: units,
+                  cell: (unit) => TextButton(
+                    onPressed: () => onDetails(unit),
+                    child: Semantics(
+                      label: 'Ver detalhes de ${unit.name}',
+                      excludeSemantics: true,
+                      child: const Text('Ver detalhes'),
+                    ),
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: onSelectUnits,
+                  child: const Text('Alterar seleção na Lista'),
+                ),
               ],
-              const SizedBox(height: 4),
-              SegmentedButton<TravelMode>(
-                style: AppTheme.primarySegmentedButtonStyle,
-                segments: const [
-                  ButtonSegment(value: TravelMode.car, label: Text('Carro')),
-                  ButtonSegment(value: TravelMode.bus, label: Text('Ônibus')),
-                ],
-                selected: {travelMode},
-                onSelectionChanged: (selection) =>
-                    onTravelModeChanged(selection.first),
-              ),
             ],
           ),
         ),
-        Expanded(child: body),
       ],
     );
   }
 }
 
-class _ComparisonCard extends StatelessWidget {
-  const _ComparisonCard({
-    required this.unit,
-    required this.operational,
-    required this.straightLineKm,
-    required this.now,
-    required this.mode,
-    required this.selected,
-    required this.onSelect,
-    required this.onDetails,
-  });
+class _ComparisonRow extends StatelessWidget {
+  const _ComparisonRow({required this.units, required this.cell, this.label});
 
-  final HealthUnit unit;
-  final UnitOperationalData? operational;
-  final double? straightLineKm;
-  final DateTime now;
-  final TravelMode mode;
-  final bool selected;
-  final VoidCallback onSelect;
-  final VoidCallback onDetails;
+  final List<HealthUnit> units;
+  final Widget Function(HealthUnit unit) cell;
+  final String? label;
 
   @override
-  Widget build(BuildContext context) {
-    final route = unit.routeFor(mode);
-    return Card.outlined(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: selected ? AppColors.blue : AppColors.border,
-          width: selected ? 2 : 1,
-        ),
-      ),
-      child: Semantics(
-        selected: selected,
-        child: InkWell(
-          onTap: onSelect,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        unit.name,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColors.navy,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Ver detalhes de ${unit.name}',
-                      onPressed: onDetails,
-                      icon: const Icon(Icons.arrow_forward, size: 20),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                UnitAvailabilityStatus(unit: unit, now: now),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    MetricColumn(
-                      value: operational?.waitMinutes == null
-                          ? 'Indisponível'
-                          : '${operational!.waitMinutes} min',
-                      label: 'espera',
-                      compact: true,
-                    ),
-                    MetricColumn(
-                      value: route == null
-                          ? 'Indisponível'
-                          : '${route.durationMinutes} min',
-                      label: mode.label,
-                      alignment: CrossAxisAlignment.center,
-                      compact: true,
-                    ),
-                    MetricColumn(
-                      value: formatStraightLineDistanceValue(straightLineKm),
-                      label: straightLineDistanceMetricLabel,
-                      alignment: CrossAxisAlignment.end,
-                      compact: true,
-                    ),
-                  ],
-                ),
-                if (unit.services.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    unit.services.join(' · '),
-                    style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: AppColors.muted),
-                  ),
-                ],
-              ],
+  Widget build(BuildContext context) => Card.outlined(
+    margin: const EdgeInsets.only(bottom: 6),
+    color: Colors.white,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (label case final title?) ...[
+            Text(
+              title,
+              style: Theme.of(context).textTheme.labelLarge
+                  ?.copyWith(color: AppColors.muted),
             ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final (index, unit) in units.indexed) ...[
+                if (index > 0) const SizedBox(width: 12),
+                Expanded(
+                  child: Semantics(
+                    container: true,
+                    label: label == null ? null : '$label, ${unit.name}',
+                    child: cell(unit),
+                  ),
+                ),
+              ],
+            ],
           ),
-        ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }

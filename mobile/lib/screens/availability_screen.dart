@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
+import 'package:rotasaude/widgets/screen_back_button.dart';
 
 class AvailabilityScreen extends StatelessWidget {
   const AvailabilityScreen({super.key});
@@ -12,11 +13,7 @@ class AvailabilityScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Disponibilidade'),
-        leading: IconButton(
-          tooltip: 'Voltar',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
+        leading: const ScreenBackButton(),
       ),
       body: SafeArea(
         top: false,
@@ -32,7 +29,7 @@ class AvailabilityScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'O nível resume dados operacionais da unidade e pode mudar ao longo do dia.',
+              'O nível é informado pela unidade ou pelo sistema que envia seus dados operacionais. Pode mudar ao longo do dia.',
               style: textTheme.bodyLarge?.copyWith(
                 color: AppColors.muted,
                 height: 1.4,
@@ -51,7 +48,7 @@ class AvailabilityScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'As cores não representam classificação clínica de pacientes nem substituem a triagem profissional. Dados marcados como ilustrativos são demonstrativos e não representam a situação atual da unidade.',
+                'O indicador é da unidade como um todo. Confirme diretamente quais serviços estão atendendo. A avaliação de pacientes é feita pela triagem da unidade. Dados marcados como ilustrativos são demonstrações.',
                 style: textTheme.bodyMedium?.copyWith(
                   color: AppColors.navy,
                   height: 1.4,
@@ -78,15 +75,7 @@ class _AvailabilityCard extends StatelessWidget {
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AvailabilityPill(level: level),
-            const SizedBox(height: 5),
-            Text(
-              'Situação operacional da unidade',
-              style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: AppColors.muted),
-            ),
-          ],
+          children: [AvailabilityPill(level: level)],
         ),
       ),
     );
