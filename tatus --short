@@ -1,0 +1,24 @@
+ README.md                                                  |   3 [32m+[m[31m-[m
+ backend/.env.example                                       |  11 [32m+++[m
+ backend/README.md                                          |  19 [32m++++[m[31m-[m
+ backend/apps/routing/serializers.py                        |   6 [32m++[m
+ backend/apps/routing/views.py                              |  23 [32m+++++[m[31m-[m
+ backend/config/settings.py                                 |  11 [32m+++[m
+ docs/arquitetura-mobile.md                                 |  21 [32m++[m[31m---[m
+ mobile/lib/repositories/route_parser.dart                  |  84 [32m+++++++++++++++++++[m
+ mobile/lib/repositories/route_repository.dart              |  30 [32m+++++[m[31m--[m
+ mobile/lib/screens/availability_screen.dart                |   2 [32m+[m[31m-[m
+ mobile/lib/screens/discovery/discovery_comparison_tab.dart |  82 [32m+++++++++[m[31m----------[m
+ mobile/lib/screens/discovery/discovery_list_tab.dart       |   4 [31m-[m
+ mobile/lib/screens/discovery/discovery_map_tab.dart        |   4 [31m-[m
+ mobile/lib/screens/map_screen.dart                         |  87 [32m+++++++++++++++++[m[31m---[m
+ mobile/lib/screens/route_preview_screen.dart               | 360 [32m+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++[m[31m--------------[m
+ mobile/lib/screens/unit_details_screen.dart                |   4 [31m-[m
+ mobile/lib/widgets/unit_ui.dart                            |  42 [32m++[m[31m--------[m
+ mobile/test/api_contract_test.dart                         |  31 [32m+++++++[m
+ mobile/test/manual_location_test.dart                      |   7 [32m++[m
+ mobile/test/operational_refresh_test.dart                  | 166 [32m+++++++++++++++++++++++++++++++++++++[m
+ mobile/test/route_parser_test.dart                         |  69 [32m++++++++++++++++[m
+ mobile/test/route_repository_test.dart                     |  66 [32m+++++++++++++++[m
+ mobile/test/unit_discovery_test.dart                       | 123 [32m+++++++++++++++[m[31m-------------[m
+ 23 files changed, 1010 insertions(+), 245 deletions(-)

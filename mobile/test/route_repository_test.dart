@@ -7,6 +7,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
 
+import 'support/route_fixtures.dart';
+
 http.Response jsonResponse(Object body, {int status = 200}) =>
     http.Response.bytes(
       utf8.encode(jsonEncode(body)),
@@ -119,5 +121,69 @@ void main() {
 
     expect(error.kind, HealthApiFailureKind.invalidResponse);
     expect(error.message, contains('contrato'));
+  });
+
+  test('rota de ônibus: GET com mode=bus e resposta simulada', () async {
+    late http.Request seen;
+    final repository = repositoryFor((request) async {
+      seen = request;
+      return jsonResponse(busRouteJson());
+    });
+
+    final route = await repository.fetchBusRoute(
+      origin: origin,
+      unitId: 'upa-centro',
+    );
+
+    expect(seen.url.path, '/api/v1/routes/');
+    expect(seen.url.queryParameters['mode'], 'bus');
+    expect(seen.url.queryParameters['unit_id'], 'upa-centro');
+    expect(seen.url.queryParameters['origin_lat'], '-16.6869');
+    expect(route.lineName, 'Linha A1');
+  });
+
+  test('rota de carro continua usando mode=driving', () async {
+    late http.Request seen;
+    final repository = repositoryFor((request) async {
+      seen = request;
+      return jsonResponse({
+        'provider': 'osrm',
+        'mode': 'driving',
+        'unit_id': 'upa-centro',
+        'distance_meters': 10,
+        'duration_seconds': 10,
+        'geometry': {
+          'type': 'LineString',
+          'coordinates': [
+            [-49.2, -16.6],
+          ],
+        },
+      });
+    });
+    await repository.fetchDrivingRoute(origin: origin, unitId: 'upa-centro');
+    expect(seen.url.queryParameters['mode'], 'driving');
+  });
+
+  test('rota de ônibus: 400 (modo de demonstração desligado) e 404', () async {
+    for (final status in [400, 404]) {
+      final repository = repositoryFor(
+        (_) async => jsonResponse({'detail': 'sem rota'}, status: status),
+      );
+      final error = await failureOf(
+        () => repository.fetchBusRoute(origin: origin, unitId: 'upa-centro'),
+      );
+      expect(error.kind, HealthApiFailureKind.client);
+      expect(error.statusCode, status);
+    }
+  });
+
+  test('rota de ônibus sem marca de simulação é fora do contrato', () async {
+    final repository = repositoryFor(
+      (_) async => jsonResponse(busRouteJson(isSimulated: false)),
+    );
+    final error = await failureOf(
+      () => repository.fetchBusRoute(origin: origin, unitId: 'upa-centro'),
+    );
+    expect(error.kind, HealthApiFailureKind.invalidResponse);
   });
 }

@@ -12,6 +12,12 @@ String formatUpdateTime(DateTime instant) {
       '${two(local.hour)}:${two(local.minute)}';
 }
 
+String formatClockTime(DateTime instant) {
+  final local = instant.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.hour)}:${two(local.minute)}';
+}
+
 extension HealthUnitStatusText on HealthUnit {
   /// Nível exibível: só existe quando a leitura é atual e traz o nível.
   AvailabilityLevel? get currentAvailability =>
@@ -84,42 +90,6 @@ class AvailabilityPill extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Aviso de dado demonstrativo. Só deve ser exibido para unidades ou leituras
-/// marcadas com `is_demo` (ou para conteúdo sempre ilustrativo, como rotas).
-class IllustrativeNotice extends StatelessWidget {
-  const IllustrativeNotice({
-    super.key,
-    this.compact = false,
-    this.short = false,
-  });
-
-  final bool compact;
-  final bool short;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'Dados ilustrativos para o protótipo',
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 10 : 14,
-          vertical: compact ? 8 : 12,
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xFFEAF4FA),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
-          short ? 'Dados ilustrativos · protótipo' : 'Dados ilustrativos do protótipo. Não representam a situação atual da unidade.',
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: AppColors.navy, height: 1.35),
         ),
       ),
     );

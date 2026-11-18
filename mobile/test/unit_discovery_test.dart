@@ -10,6 +10,7 @@ import 'package:rotasaude/models/health_unit.dart';
 import 'package:rotasaude/repositories/health_unit_parser.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/driving_route.dart';
+import 'package:rotasaude/models/transit_route.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
@@ -20,6 +21,7 @@ import 'package:rotasaude/services/user_location_session_store.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
 
 import 'support/health_unit_fixtures.dart';
+import 'support/route_fixtures.dart';
 
 void main() {
   FakeHealthUnitRepository goianiaRepository() =>
@@ -190,9 +192,7 @@ void main() {
     expect(find.text('UPA Exemplo Centro'), findsNothing);
   });
 
-  testWidgets('mapa informa origem manual e dados ilustrativos', (
-    tester,
-  ) async {
+  testWidgets('mapa informa origem manual', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: MapScreen(
@@ -207,7 +207,7 @@ void main() {
       find.textContaining('Saindo de Goiânia · ponto manual'),
       findsOneWidget,
     );
-    expect(find.textContaining('Dados ilustrativos'), findsOneWidget);
+    expect(find.textContaining('Dados simulados'), findsNothing);
   });
 
   testWidgets('arrastar card da UPA para baixo o oculta; outra UPA reabre', (
@@ -397,14 +397,14 @@ void main() {
     expect(find.text('UPA Exemplo Oeste'), findsOneWidget);
   });
 
-  testWidgets('lista exibe contexto, espera e aviso demonstrativo', (
+  testWidgets('lista exibe contexto e espera, sem aviso de simulação', (
     tester,
   ) async {
     await openDiscovery(tester);
     await openList(tester);
     expect(find.text('Unidades de saúde'), findsOneWidget);
     expect(find.text('Buscando em Goiânia'), findsOneWidget);
-    expect(find.textContaining('Dados ilustrativos'), findsWidgets);
+    expect(find.textContaining('Dados simulados'), findsNothing);
     expect(find.text('20 min'), findsOneWidget);
     expect(find.textContaining('em linha reta'), findsWidgets);
     expect(find.text('Indisponível'), findsNothing);
@@ -565,7 +565,7 @@ void main() {
   });
 
   testWidgets(
-    'dados reais (não demonstrativos) não recebem aviso ilustrativo',
+    'dados reais (não demonstrativos) não recebem aviso de simulação',
     (tester) async {
       final real = parseHealthUnit(
         unitJson(
@@ -584,9 +584,9 @@ void main() {
         ),
       );
 
-      expect(find.textContaining('Dados ilustrativos'), findsNothing);
+      expect(find.textContaining('Dados simulados'), findsNothing);
       await openList(tester);
-      expect(find.textContaining('Dados ilustrativos'), findsNothing);
+      expect(find.textContaining('Dados simulados'), findsNothing);
       expect(find.text('20 min'), findsOneWidget);
     },
   );
@@ -748,12 +748,7 @@ void main() {
     expect(find.text('$centroKm em linha reta'), findsOneWidget);
 
     expect(find.text('Funcionamento · 24 horas'), findsOneWidget);
-    expect(
-      find.text(
-        'Dados ilustrativos do protótipo. Não representam a situação atual da unidade.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Dados simulados'), findsNothing);
 
     await tester.tap(find.text('Ver rota'));
     await tester.pumpAndSettle();
@@ -770,48 +765,50 @@ void main() {
     expect(find.text('Detalhes da unidade'), findsOneWidget);
   });
 
-  testWidgets('compara duas unidades, substitui uma e indica falta de ônibus', (
-    tester,
-  ) async {
-    await openDiscovery(tester, textScale: 2, size: const Size(320, 640));
-    await openList(tester);
-    await toggleUnit(tester, 'upa-centro');
-    await toggleUnit(tester, 'upa-norte');
-    await toggleUnit(tester, 'upa-oeste');
-    final replacement = find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.text('UPA Exemplo Norte'),
-    );
-    await tester.ensureVisible(replacement);
-    await tester.pumpAndSettle();
-    await tester.tap(replacement);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Comparar (2/2)'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('UPA Exemplo Oeste'),
-      180,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('UPA Exemplo Centro'), findsOneWidget);
-    expect(find.text('UPA Exemplo Norte'), findsNothing);
+  testWidgets(
+    'compara duas unidades, substitui uma e alterna para ônibus',
+    (tester) async {
+      await openDiscovery(tester, textScale: 2, size: const Size(320, 640));
+      await openList(tester);
+      await toggleUnit(tester, 'upa-centro');
+      await toggleUnit(tester, 'upa-norte');
+      await toggleUnit(tester, 'upa-oeste');
+      final replacement = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('UPA Exemplo Norte'),
+      );
+      await tester.ensureVisible(replacement);
+      await tester.pumpAndSettle();
+      await tester.tap(replacement);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Comparar (2/2)'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('UPA Exemplo Oeste'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('UPA Exemplo Centro'), findsOneWidget);
+      expect(find.text('UPA Exemplo Norte'), findsNothing);
 
-    await tester.scrollUntilVisible(
-      find.text('Ônibus'),
-      180,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.ensureVisible(find.text('Ônibus'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Ônibus'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Tempo de ônibus indisponível para estas unidades.'),
-      findsOneWidget,
-    );
-    expect(find.text('Espera sem estimativa'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      await tester.scrollUntilVisible(
+        find.text('Ônibus'),
+        180,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('Ônibus'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ônibus'));
+      await tester.pumpAndSettle();
+      // Sem cálculo, o ônibus não inventa tempo: pede o cálculo.
+      expect(find.text('Tempo de ônibus'), findsOneWidget);
+      expect(find.text('Sem estimativa'), findsWidgets);
+      expect(find.text('Calcular tempos de ônibus'), findsOneWidget);
+      expect(find.textContaining('Dados simulados'), findsNothing);
+      expect(find.text('Espera sem estimativa'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('detalhes da unidade Oeste omitem espera e liberam retorno', (
     tester,
@@ -970,6 +967,20 @@ void main() {
 
 /// Repositório cuja consulta só termina quando o teste libera.
 class FakeRouteRepository implements RouteRepository {
+  /// Quando definido, [fetchBusRoute] falha com ele.
+  HealthApiException? busFailure;
+  final busRequests = <String>[];
+
+  @override
+  Future<TransitRoute> fetchBusRoute({
+    required LatLng origin,
+    required String unitId,
+  }) async {
+    busRequests.add(unitId);
+    if (busFailure case final error?) throw error;
+    return busRoute(unitId: unitId);
+  }
+
   @override
   Future<DrivingRoute> fetchDrivingRoute({
     required LatLng origin,
