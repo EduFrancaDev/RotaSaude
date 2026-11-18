@@ -1,5 +1,10 @@
+from django.conf import settings
+from django.utils import timezone
+from django.utils.functional import cached_property
 from rest_framework import serializers
 
+from apps.demo.profiles import PROFILES
+from apps.demo.scenarios import RANDOM_POOL, SCENARIOS
 from apps.units.models import HealthUnit, UnitOperationalStatus
 
 
@@ -47,6 +52,38 @@ class HealthUnitSerializer(serializers.ModelSerializer):
             "last_operational_update_at",
         ]
         read_only_fields = fields
+
+    @cached_property
+    def _simulation_minute(self):
+        return timezone.now().replace(second=0, microsecond=0)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not settings.DEMO_API_QUEUE_SIMULATION or not instance.is_demo:
+            return data
+
+        profile = PROFILES.get(instance.external_id)
+        if profile is None or profile.reserved:
+            return data
+
+        minute = self._simulation_minute
+        scenario = profile.scenario
+        if not profile.pinned:
+            offset = RANDOM_POOL.index(scenario)
+            cycle = int(minute.timestamp()) // 60
+            scenario = RANDOM_POOL[(cycle + offset) % len(RANDOM_POOL)]
+
+        reading = UnitOperationalStatus(
+            **SCENARIOS[scenario].values,
+            source_updated_at=minute,
+            received_at=minute,
+            is_demo=True,
+        )
+        status = OperationalStatusSerializer(reading).data
+        data["name"] = f"{instance.name} (dados simulados)"
+        data["operational_status"] = status
+        data["last_operational_update_at"] = status["source_updated_at"]
+        return data
 
     def get_services(self, obj):
         return [service.name for service in obj.services.all()]

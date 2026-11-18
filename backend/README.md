@@ -4,6 +4,18 @@ API REST em Django + Django REST Framework + PostgreSQL, consumida pelo [app Flu
 
 > **Dados DEMONSTRATIVOS.** O seed cadastra quatro unidades fictícias de Goiânia para demonstração no app. Elas e suas leituras operacionais não são informações oficiais, atuais nem de estabelecimentos reais e vêm marcadas com `is_demo: true`.
 
+## Filas simuladas na API hospedada
+
+Para a apresentação acadêmica, configure `DEMO_API_QUEUE_SIMULATION=true` na API.
+As unidades fictícias com cenário de fila recebem uma leitura calculada por minuto
+na lista e no detalhe. A resposta inclui `is_demo: true` e o nome identifica
+os dados simulados também no APK atual. Unidades reais e cenários reservados,
+como a unidade sem dados, usam as leituras armazenadas normalmente.
+
+O modo fica desligado por padrão. Ele funciona com `DJANGO_DEBUG=false` e
+`DEMO_MODE=false`. As consultas não gravam leituras no PostgreSQL e a simulação
+não exige worker. Para desativar, defina `DEMO_API_QUEUE_SIMULATION=false`.
+
 ## Stack
 
 Python 3.12 (imagem Docker; validado também em 3.14), Django 5.2 LTS, DRF 3.16, django-cors-headers, psycopg 3, PostgreSQL 16. Versões fixadas em `requirements.txt`. Os filtros são simples e feitos na própria view, sem `django-filter`.
