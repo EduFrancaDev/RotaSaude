@@ -20,17 +20,18 @@ mobile/lib/
 │   ├── location_selection_screen.dart  escolha de área de consulta
 │   ├── manual_location_picker_screen.dart  ponto no mapa sem GPS
 │   ├── unit_details_screen.dart  detalhes e dados indisponíveis da unidade
-│   ├── route_preview_screen.dart  rota de carro no mapa e estados de falha
+│   ├── route_preview_screen.dart  rota de carro ou ônibus simulado no mapa e estados de falha
 │   └── availability_screen.dart  explicação dos indicadores
 ├── models/
 │   ├── health_unit.dart      áreas, unidade, leitura operacional e atualidade dos dados
 │   ├── user_location_origin.dart  origem GPS ou manual para distâncias e rotas
-│   └── driving_route.dart    rota de carro normalizada (distância, duração, polyline)
+│   ├── driving_route.dart    rota de carro normalizada (distância, duração, polyline)
+│   └── transit_route.dart    rota de ônibus SIMULADA (linha, pontos, etapas e horários fictícios)
 ├── repositories/
 │   ├── health_unit_repository.dart  cliente HTTP da API e erros tipados
 │   ├── health_unit_parser.dart  JSON da API para o modelo do app
-│   ├── route_repository.dart  cliente HTTP de `/api/v1/routes/`
-│   └── route_parser.dart  GeoJSON LineString → pontos do mapa
+│   ├── route_repository.dart  cliente HTTP de `/api/v1/routes/` (carro e ônibus simulado)
+│   └── route_parser.dart  GeoJSON LineString → pontos do mapa; rota de ônibus simulada
 ├── services/
 │   ├── api_config.dart       URL base (--dart-define) e timeout
 │   ├── location_access.dart  acesso à localização do dispositivo
@@ -39,7 +40,7 @@ mobile/lib/
 │   ├── straight_line_distance.dart  distância geográfica local (linha reta)
 │   └── external_maps.dart   abertura do destino no app de mapas
 ├── widgets/
-│   └── unit_ui.dart          indicadores, métricas e aviso ilustrativo
+│   └── unit_ui.dart          indicadores e métricas
 └── theme/
     ├── app_colors.dart       cores da marca
     └── app_theme.dart        tema Material 3
@@ -57,19 +58,21 @@ A entrada oferece duas ações. **Usar minha localização** solicita permissão
 
 `MapScreen` trata carregamento, falha (com “Tentar novamente” e mensagem por tipo de erro), cidade sem unidades, busca sem correspondência e filtro sem resultados. Resultados de consultas substituídas por uma troca de área são descartados.
 
+Depois do carregamento, `MapScreen` reconsulta as unidades em segundo plano a cada 30 s (`dataRefreshInterval`; `Duration.zero` desliga). A reconsulta é silenciosa: não mostra carregamento nem erro, descarta o resultado se a área mudou e, em caso de falha, mantém a lista atual; a janela de atualidade abaixo continua impedindo que leitura antiga pareça atual. Telas de detalhe e de rota abertas guardam o retrato da unidade do momento em que foram abertas.
+
 ### Atualidade dos dados operacionais
 
 A API não define validade, então o app aplica uma janela (`operationalDataMaxAge`, 30 min; ajustável com `--dart-define=OPERATIONAL_MAX_AGE_MINUTES=...`). `HealthUnit.operationalState()` devolve `current`, `stale` (antiga, no futuro além de 5 min de tolerância, ou sem data válida) ou `missing` (sem leitura ou com todos os campos nulos). Somente `current` alimenta indicadores, espera, ordenação e marcadores; Ao vencer, a espera passa a “Espera sem atualização”; detalhes, comparação e rota mostram a hora da última leitura quando disponível. Quando falta uma estimativa em uma leitura atual ou a unidade não tem leitura, o app exibe “Espera sem estimativa”. A idade é calculada com o relógio do aparelho. `MapScreen` dispara `setState` a cada minuto para reavaliar a janela sem consultar o backend.
 
 ### Dados demonstrativos
 
-O aviso ilustrativo só aparece quando a unidade ou a leitura vêm com `is_demo: true`. Os dados do `seed_demo_units` são marcados assim. Como o seed grava a leitura uma única vez, ela envelhece e passa a `stale`; para demonstrar dados atuais, envie uma nova leitura pela integração do backend.
+A interface **não exibe aviso** de dados simulados (decisão do projeto para a apresentação); o app apenas lê `is_demo` no modelo, e a API continua marcando os dados do `seed_demo_units` e do modo de demonstração do backend (`apps/demo`, veja [`demo-academica.md`](demo-academica.md)). Como o seed grava a leitura uma única vez, ela envelhece e passa a `stale`; para demonstrar dados atuais, use `simulate_operational_status` (ou a integração) no backend: com a reconsulta periódica, o app mostra a leitura nova sem reabrir a tela. Leitura sem nenhum valor (falha de atualização simulada) é tratada como `missing`.
 
 ### Localização, distâncias e rotas
 
 O GPS e o ponto confirmado no mapa são origens opcionais. O app pede origem para ordenar por proximidade ou calcular deslocamentos. A distância em linha reta é calculada localmente por `Geolocator.distanceBetween()` e rotulada separadamente do trajeto. A ordenação por espera coloca estimativas atuais primeiro.
 
-`RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`. Exibe o destino durante carregamento e falhas e mantém o endereço selecionável. O trajeto e a duração vêm do OSRM. A comparação consulta as unidades selecionadas em sequência, respeitando o intervalo padrão do provedor, e reaproveita os tempos calculados para a origem atual também nos cards. O provedor não entrega rotas de ônibus. A abertura externa usa o plugin Flutter `url_launcher` para repassar coordenadas ou endereço ao sistema. Se o sistema não abrir um aplicativo externo, o endereço permanece acessível.
+`RoutePreviewScreen` consulta `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`. Exibe o destino durante carregamento e falhas e mantém o endereço selecionável. O trajeto e a duração vêm do OSRM. A comparação consulta as unidades selecionadas em sequência, respeitando o intervalo padrão do provedor, e reaproveita os tempos calculados para a origem atual também nos cards. **Ônibus:** o seletor **Carro | Ônibus** da prévia consulta `mode=bus`, que o backend só atende em modo de demonstração e para unidades demonstrativas. `parseTransitRoute` exige `is_simulated: true` (uma rota de ônibus sem essa marca é rejeitada como fora do contrato) e a tela exibe linha, pontos, caminhadas, espera e horários, com o traçado esquemático. Um `400` vira “Transporte público indisponível neste servidor” e um `404`, “Não há rota de ônibus para este trajeto”; o carro não é afetado. Na aba Comparar, o tempo de ônibus é calculado sob demanda e só vem dessa API. Não existe transporte público real no app. A abertura externa usa o plugin Flutter `url_launcher` para repassar coordenadas ou endereço ao sistema. Se o sistema não abrir um aplicativo externo, o endereço permanece acessível.
 
 ### Rede em desenvolvimento
 
@@ -84,8 +87,8 @@ As cores usadas em `AppColors` seguem o [JPG de referência da marca](../mobile/
 ## Evolução prevista
 
 1. Usar `StatefulWidget` e `setState` para estado local simples. Avaliar outra solução apenas quando o fluxo mostrar uma necessidade concreta.
-2. Evoluir transporte público e endereços de pontos manuais quando houver integrações que entreguem esses dados.
-3. Atualizar os dados sem reabrir a tela (puxar para atualizar ou ao voltar ao app) e HTTPS/ATS para produção, quando solicitados.
+2. Evoluir transporte público real e endereços de pontos manuais quando houver integrações que entreguem esses dados.
+3. Puxar para atualizar, atualizar ao voltar ao app e HTTPS/ATS para produção, quando solicitados.
 
 ## Desenvolvimento no celular
 

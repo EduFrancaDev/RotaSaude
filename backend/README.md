@@ -67,7 +67,7 @@ Os endpoints públicos (`health`, `units`, `services`) são somente leitura: `PO
 | GET | `/api/v1/units/{id}/` | Detalhe. `{id}` é o `external_id` público (ex.: `upa-centro`). |
 | GET | `/api/v1/services/` | Lista paginada de serviços. |
 | POST | `/api/v1/integrations/operational-status/` | Leitura operacional enviada por um estabelecimento (chave Bearer; veja abaixo). |
-| GET | `/api/v1/routes/` | Rota de carro até uma unidade (`driving`; provedor configurável; veja [Rotas](#rotas-de-carro-osrm)). |
+| GET | `/api/v1/routes/` | Rota de carro até uma unidade (`driving`; provedor configurável; veja [Rotas](#rotas-de-carro-osrm)). Com o [modo de demonstração](../docs/demo-academica.md), `mode=bus` devolve uma rota de ônibus **simulada**. |
 
 ### Paginação
 
@@ -231,7 +231,7 @@ Roteamento real de **carro** via provedor configurável (`ROUTING_PROVIDER`, hoj
 `GET /api/v1/routes/?origin_lat=&origin_lon=&unit_id=&mode=driving`
 
 - Destino: coordenadas da unidade ativa no PostgreSQL (`external_id` = `unit_id`).
-- `mode`: apenas `driving`. `bus`, `transit` e similares → `400` com mensagem explícita de transporte público indisponível.
+- `mode`: `driving` (real, OSRM). `bus`, `transit` e `public_transport` → `400` com mensagem explícita de transporte público indisponível, **exceto** com `DEMO_MODE=true` (e `DJANGO_DEBUG=true`), quando devolvem uma rota de ônibus simulada para unidades demonstrativas (sem OSRM nem API externa; veja [`docs/demo-academica.md`](../docs/demo-academica.md)). `walking` e `cycling` seguem `400`.
 - Erros: `400` validação, `404` unidade, `429` limite da API, `502` rota rejeitada pelo provedor, `503` provedor ocupado/indisponível/timeout. Detalhes internos não são expostos.
 - Logs: apenas `unit_id` e `mode`; **não** registram coordenadas de origem.
 
@@ -274,12 +274,27 @@ backend/
 ├── apps/integrations/ IntegrationCredential, autenticação por chave, throttle,
 │                      endpoint de ingestão e comando create_integration_credential
 ├── apps/routing/      RoutingProvider, OSRM, GET /routes/
+├── apps/demo/         modo de demonstração acadêmica: cenários, simulador, rota de ônibus
+│                      simulada e comandos seed_demo_scenarios, simulate_operational_status
+│                      e show_demo_status (DemoReadingMark; veja docs/demo-academica.md)
 ├── compose.yaml · Dockerfile · requirements.txt · .env.example
 ```
 
 ## Seed demonstrativo
 
 `python manage.py seed_demo_units` é idempotente: atualiza as 4 unidades pelo `external_id`, garante serviços e vínculos sem duplicar e só grava uma nova leitura operacional quando os valores demonstrativos mudam. `upa-oeste` permanece sem dados operacionais. O `source_updated_at` das leituras demonstrativas é o momento da primeira execução do seed, e não uma medição real.
+
+## Modo de demonstração acadêmica
+
+`DEMO_MODE` (padrão `false`) liga `apps/demo`: comandos que gravam leituras **simuladas** nas unidades `is_demo` e a rota de ônibus simulada. Só vale com `DJANGO_DEBUG=true`; com `DJANGO_DEBUG=false` a aplicação não inicia. Nada roda ao subir o Django e o contrato público de `units` não muda. Cenários, comandos e roteiro: [`docs/demo-academica.md`](../docs/demo-academica.md).
+
+Com Podman, `./scripts/start-demo.sh` (na raiz do repositório) faz tudo: valida o `.env`, sobe o projeto `rotasaude_demo`, aplica migrações e semeia os cenários. O Compose deve sempre ser chamado com `-p rotasaude_demo --env-file .env` neste ambiente; sem `-p` o projeto vira `backend` e colide com outros worktrees.
+
+```bash
+python manage.py seed_demo_scenarios
+python manage.py simulate_operational_status --all --scenario random --interval 60   # Ctrl+C encerra
+python manage.py show_demo_status --unit upa-centro --history 10
+```
 
 ## Histórico operacional e Admin
 

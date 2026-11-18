@@ -180,10 +180,6 @@ class _UnitCard extends StatelessWidget {
                 else if (distance == null)
                   const Text(straightLineDistanceUnavailable),
                 if (minutes case final minutes?) Text('$minutes min de carro'),
-                if (unit.isDemo) ...[
-                  const SizedBox(height: 8),
-                  const IllustrativeNotice(compact: true, short: true),
-                ],
               ],
             ),
           ),

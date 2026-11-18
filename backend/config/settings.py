@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "apps.units",
     "apps.integrations",
     "apps.routing",
+    "apps.demo",
 ]
 
 MIDDLEWARE = [
@@ -126,6 +127,16 @@ ROUTING_CACHE_TTL = int(os.environ.get("ROUTING_CACHE_TTL", "120"))
 ROUTING_RATE_LIMIT = os.environ.get("ROUTING_RATE_LIMIT", "30/min")
 OSRM_MIN_REQUEST_INTERVAL = float(os.environ.get("OSRM_MIN_REQUEST_INTERVAL", "1.0"))
 OSRM_OUTBOUND_LOCK_TTL = int(os.environ.get("OSRM_OUTBOUND_LOCK_TTL", "30"))
+
+# --- Modo de demonstração acadêmica (apps.demo) ---
+# Desligado por padrão. Só vale com DJANGO_DEBUG=true: ativá-lo em um ambiente sem debug é
+# tratado como erro de configuração, para que dados simulados nunca cheguem a produção.
+DEMO_MODE = env_bool("DEMO_MODE", False)
+if DEMO_MODE and not DEBUG:
+    raise ImproperlyConfigured("DEMO_MODE exige DJANGO_DEBUG=true; o modo de demonstração é bloqueado fora do debug.")
+# Idade a partir da qual `show_demo_status` classifica uma leitura como desatualizada.
+# Deve coincidir com OPERATIONAL_MAX_AGE_MINUTES do app Flutter (padrão 30).
+DEMO_STALE_AFTER_MINUTES = int(os.environ.get("DEMO_STALE_AFTER_MINUTES", "30"))
 
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
     "integration": INTEGRATION_RATE_LIMIT,

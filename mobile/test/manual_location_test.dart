@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/app.dart';
 import 'package:rotasaude/models/driving_route.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/models/transit_route.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_parser.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
@@ -274,6 +275,12 @@ void main() {
 }
 
 class _TrackingRouteRepository implements RouteRepository {
+  @override
+  Future<TransitRoute> fetchBusRoute({
+    required LatLng origin,
+    required String unitId,
+  }) => throw UnimplementedError();
+
   LatLng? lastOrigin;
   Completer<DrivingRoute> response = Completer();
 

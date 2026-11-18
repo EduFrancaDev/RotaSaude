@@ -48,7 +48,7 @@ class AvailabilityScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Text(
-                'O indicador é da unidade como um todo. Confirme diretamente quais serviços estão atendendo. A avaliação de pacientes é feita pela triagem da unidade. Dados marcados como ilustrativos são demonstrações.',
+                'O indicador é da unidade como um todo. Confirme diretamente quais serviços estão atendendo. A avaliação de pacientes é feita pela triagem da unidade.',
                 style: textTheme.bodyMedium?.copyWith(
                   color: AppColors.navy,
                   height: 1.4,

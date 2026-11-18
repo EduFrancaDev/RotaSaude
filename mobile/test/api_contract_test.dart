@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
+import 'package:rotasaude/repositories/route_repository.dart';
 
 /// Respostas reais do backend Django (`feat/backend-mvp`), capturadas com
 /// `curl` após `seed_demo_units`, em `test/fixtures/api/`. Garantem que o
@@ -112,6 +114,35 @@ void main() {
             .having((e) => e.kind, 'kind', HealthApiFailureKind.client)
             .having((e) => e.statusCode, 'status', 404),
       ),
+    );
+  });
+
+  test('lê a rota de ônibus simulada devolvida pelo backend real', () async {
+    final routes = ApiRouteRepository(
+      baseUri: Uri.parse('http://10.0.2.2:8000'),
+      client: MockClient((request) async {
+        expect(request.url.queryParameters['mode'], 'bus');
+        return served('route_bus_simulated.json');
+      }),
+    );
+
+    final route = await routes.fetchBusRoute(
+      origin: const LatLng(-16.6869, -49.2648),
+      unitId: 'upa-sul',
+    );
+
+    expect(route.provider, 'demo-simulated');
+    expect(route.lineCode, startsWith('DEMO-'));
+    expect(route.unitId, 'upa-sul');
+    expect(route.notice, contains('Dados simulados'));
+    expect(route.polyline, hasLength(4));
+    expect(route.polyline.first, const LatLng(-16.6869, -49.2648));
+    expect(route.polyline.last, const LatLng(-16.71, -49.259));
+    expect(route.departureAt.isBefore(route.busDepartureAt), isTrue);
+    expect(route.busArrivalAt.isBefore(route.arrivalAt), isTrue);
+    expect(
+      route.arrivalAt.difference(route.departureAt).inSeconds,
+      closeTo(route.durationSeconds, 1),
     );
   });
 }

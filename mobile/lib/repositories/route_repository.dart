@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/driving_route.dart';
+import 'package:rotasaude/models/transit_route.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_parser.dart';
 import 'package:rotasaude/services/api_config.dart';
@@ -12,6 +13,13 @@ import 'package:rotasaude/services/api_config.dart';
 /// Consulta rotas de deslocamento expostas pela API Django.
 abstract interface class RouteRepository {
   Future<DrivingRoute> fetchDrivingRoute({
+    required LatLng origin,
+    required String unitId,
+  });
+
+  /// Rota de ônibus **simulada** (demonstração). Falha com
+  /// [HealthApiException] quando o servidor não oferece transporte público.
+  Future<TransitRoute> fetchBusRoute({
     required LatLng origin,
     required String unitId,
   });
@@ -38,16 +46,26 @@ class ApiRouteRepository implements RouteRepository {
     required LatLng origin,
     required String unitId,
   }) async {
-    final body = await _getJson(
+    final body = await _getJson(_routeUri(origin, unitId, 'driving'));
+    return _parse(body, parseDrivingRoute);
+  }
+
+  @override
+  Future<TransitRoute> fetchBusRoute({
+    required LatLng origin,
+    required String unitId,
+  }) async {
+    final body = await _getJson(_routeUri(origin, unitId, 'bus'));
+    return _parse(body, parseTransitRoute);
+  }
+
+  Uri _routeUri(LatLng origin, String unitId, String mode) =>
       _endpoint('routes/', {
         'origin_lat': '${origin.latitude}',
         'origin_lon': '${origin.longitude}',
         'unit_id': unitId,
-        'mode': 'driving',
-      }),
-    );
-    return _parse(body, parseDrivingRoute);
-  }
+        'mode': mode,
+      });
 
   @override
   void close() {

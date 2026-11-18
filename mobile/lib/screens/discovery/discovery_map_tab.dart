@@ -332,10 +332,6 @@ class _MapUnitSummary extends StatelessWidget {
           else
             const Text(straightLineDistanceUnavailable),
           if (minutes case final value?) Text('$value min de carro'),
-          if (unit.isDemo) ...[
-            const SizedBox(height: 8),
-            const IllustrativeNotice(compact: true, short: true),
-          ],
           const SizedBox(height: 8),
           FilledButton(onPressed: onDetails, child: const Text('Ver detalhes')),
         ],

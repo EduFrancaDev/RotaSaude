@@ -42,6 +42,7 @@ class MapScreen extends StatefulWidget {
     this.userLocationAvailable = true,
     this.now,
     this.operationalRefreshInterval = const Duration(minutes: 1),
+    this.dataRefreshInterval = const Duration(seconds: 30),
     this.repository,
     this.routeRepository,
     this.locationAccess,
@@ -59,6 +60,10 @@ class MapScreen extends StatefulWidget {
   final ValueChanged<SearchArea>? onAreaChanged;
   final DateTime Function()? now;
   final Duration operationalRefreshInterval;
+
+  /// Intervalo da nova consulta silenciosa das unidades (leituras operacionais
+  /// novas aparecem sem reabrir a tela). `Duration.zero` desliga.
+  final Duration dataRefreshInterval;
   final HealthUnitRepository? repository;
   final RouteRepository? routeRepository;
 
@@ -80,8 +85,9 @@ class _MapScreenState extends State<MapScreen> {
   List<HealthUnit> _units = const [];
   final _comparedIds = <String>[];
   final _carMinutes = <String, int>{};
+  final _busMinutes = <String, int>{};
   bool _calculatingTimes = false;
-  bool _comparisonRequestFailed = false;
+  final _comparisonFailures = <TravelMode>{};
   int _comparisonRevision = 0;
   late _LoadStatus _loadStatus = _area == null
       ? _LoadStatus.loaded
@@ -97,6 +103,8 @@ class _MapScreenState extends State<MapScreen> {
   MapCamera? _mapCamera;
   PageStorageBucket _tabStorage = PageStorageBucket();
   Timer? _operationalTimer;
+  Timer? _dataTimer;
+  bool _refreshingUnits = false;
   List<HealthUnit>? _distanceUnits;
   LatLng? _distanceOrigin;
   Map<String, double?> _distances = const {};
@@ -125,6 +133,15 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     _loadUnits();
     _startClock();
+    _startDataRefresh();
+  }
+
+  void _startDataRefresh() {
+    _dataTimer?.cancel();
+    final interval = widget.dataRefreshInterval;
+    if (interval > Duration.zero) {
+      _dataTimer = Timer.periodic(interval, (_) => _refreshUnits());
+    }
   }
 
   void _startClock() {
@@ -142,6 +159,9 @@ class _MapScreenState extends State<MapScreen> {
         widget.operationalRefreshInterval) {
       _startClock();
     }
+    if (oldWidget.dataRefreshInterval != widget.dataRefreshInterval) {
+      _startDataRefresh();
+    }
     final oldPosition = oldWidget.userLocationAvailable
         ? _origin?.coordinate
         : null;
@@ -158,6 +178,7 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void dispose() {
     _operationalTimer?.cancel();
+    _dataTimer?.cancel();
     _searchController.dispose();
     if (widget.repository == null) _repository.close();
     _ownedRoutes?.close();
@@ -167,8 +188,9 @@ class _MapScreenState extends State<MapScreen> {
   void _resetTravelTimes() {
     _comparisonRevision++;
     _calculatingTimes = false;
-    _comparisonRequestFailed = false;
+    _comparisonFailures.clear();
     _carMinutes.clear();
+    _busMinutes.clear();
   }
 
   Future<void> _loadUnits() async {
@@ -195,6 +217,30 @@ class _MapScreenState extends State<MapScreen> {
               );
         _loadStatus = _LoadStatus.failed;
       });
+    }
+  }
+
+  /// Nova consulta em segundo plano. Não mostra carregamento nem erro: se
+  /// falhar, a lista atual fica e a janela de atualidade (30 min) já deixa de
+  /// tratar leituras antigas como atuais.
+  Future<void> _refreshUnits() async {
+    final city = _area?.city;
+    if (_refreshingUnits || _loadStatus != _LoadStatus.loaded || city == null) {
+      return;
+    }
+    final generation = _loadGeneration;
+    _refreshingUnits = true;
+    try {
+      final units = await _repository.fetchUnits(city: city);
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _units = units;
+        _comparedIds.removeWhere((id) => !units.any((unit) => unit.id == id));
+      });
+    } on Exception {
+      // Mantém os dados já exibidos.
+    } finally {
+      _refreshingUnits = false;
     }
   }
 
@@ -306,12 +352,14 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _calculateComparisonTimes() async {
     if (_calculatingTimes) return;
+    final mode = _travelMode;
+    final minutesByUnit = mode == TravelMode.bus ? _busMinutes : _carMinutes;
     final origin = _position ?? (await _chooseOrigin())?.coordinate;
     if (!mounted || origin == null || _calculatingTimes) return;
     final missing = _selectedForComparison
         .where(
           (unit) =>
-              !_carMinutes.containsKey(unit.id) &&
+              !minutesByUnit.containsKey(unit.id) &&
               isValidGeographicPosition(unit.position),
         )
         .toList();
@@ -319,25 +367,32 @@ class _MapScreenState extends State<MapScreen> {
     final revision = ++_comparisonRevision;
     setState(() {
       _calculatingTimes = true;
-      _comparisonRequestFailed = false;
+      _comparisonFailures.remove(mode);
     });
     for (final (index, unit) in missing.indexed) {
-      // O provedor público impõe um intervalo entre chamadas sem cache.
-      if (index > 0) {
+      // O provedor público de carro impõe um intervalo entre chamadas sem
+      // cache; a rota de ônibus simulada não depende de provedor externo.
+      if (index > 0 && mode == TravelMode.car) {
         await Future<void>.delayed(const Duration(milliseconds: 1100));
       }
       if (!mounted || revision != _comparisonRevision) return;
       if (!_comparedIds.contains(unit.id)) continue;
       try {
-        final route = await _routes.fetchDrivingRoute(
-          origin: origin,
-          unitId: unit.id,
-        );
+        final minutes = switch (mode) {
+          TravelMode.car => (await _routes.fetchDrivingRoute(
+            origin: origin,
+            unitId: unit.id,
+          )).durationMinutes,
+          TravelMode.bus => (await _routes.fetchBusRoute(
+            origin: origin,
+            unitId: unit.id,
+          )).durationMinutes,
+        };
         if (!mounted || revision != _comparisonRevision) return;
-        setState(() => _carMinutes[unit.id] = route.durationMinutes);
+        setState(() => minutesByUnit[unit.id] = minutes);
       } on Exception {
         if (!mounted || revision != _comparisonRevision) return;
-        setState(() => _comparisonRequestFailed = true);
+        setState(() => _comparisonFailures.add(mode));
       }
     }
     if (mounted && revision == _comparisonRevision) {
@@ -370,6 +425,11 @@ class _MapScreenState extends State<MapScreen> {
           onCalculated: (origin, route) {
             if (mounted && _position == origin) {
               setState(() => _carMinutes[unit.id] = route.durationMinutes);
+            }
+          },
+          onBusCalculated: (origin, route) {
+            if (mounted && _position == origin) {
+              setState(() => _busMinutes[unit.id] = route.durationMinutes);
             }
           },
           now: widget.now,
@@ -514,11 +574,12 @@ class _MapScreenState extends State<MapScreen> {
         now: now,
         distances: distances,
         carMinutes: _carMinutes,
+        busMinutes: _busMinutes,
         serviceFilter: comparedService,
         travelMode: _travelMode,
         hasOrigin: _position != null,
         calculating: _calculatingTimes,
-        calculationFailed: _comparisonRequestFailed,
+        calculationFailed: _comparisonFailures.contains(_travelMode),
         onCalculate: _calculateComparisonTimes,
         onChooseOrigin: _chooseOrigin,
         onMode: (mode) => setState(() => _travelMode = mode),

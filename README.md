@@ -103,6 +103,7 @@ Se o `adb` responder `device not found`, a porta mudou. Leia de novo a tela **De
 
 - [Arquitetura mobile e decisões iniciais](docs/arquitetura-mobile.md)
 - [Backend MVP: execução, endpoints e testes](backend/README.md)
+- [Demonstração acadêmica: cenários, simulador e rota de ônibus simulada](docs/demo-academica.md). Ambiente Podman completo em um comando: `./scripts/start-demo.sh` (API em `http://127.0.0.1:8001`, Postgres em `127.0.0.1:55434`); encerrar com `./scripts/stop-demo.sh`. Com ele, use a porta 8001 nos comandos `adb reverse` e `API_BASE_URL` acima.
 - [Tecnologias e proposta N1](docs/tecnologias.md)
 - [Identidade visual e arquivos SVG](mobile/assets/brand/README.md)
 - [Apresentação visual N1](docs/n1/RotaSaude_N1_apresentacao_visual_final.pdf)
@@ -118,4 +119,4 @@ flutter analyze
 flutter test
 ```
 
-A tela inicial pede localização somente após o toque em **Usar minha localização**. **Escolher cidade** abre a Lista sem GPS. A cidade define as unidades consultadas. A origem de distâncias e rotas pode ser definida mais tarde com o GPS ou um ponto no mapa. As unidades vêm da API, filtradas pela cidade (Goiânia e Aparecida de Goiânia são as áreas sugeridas). Dados marcados como demonstrativos pela API (`is_demo`) exibem aviso de ilustração. Esperas e disponibilidade só aparecem como atuais quando a leitura é recente; caso contrário, o app indica **dados desatualizados** ou **dados operacionais indisponíveis**. As distâncias em mapa, lista, comparação e detalhes são **aproximadas em linha reta** (calculadas no aparelho). O **percurso de carro** é obtido via `GET /api/v1/routes/` (OSRM no backend) na tela de rota.
+A tela inicial pede localização somente após o toque em **Usar minha localização**. **Escolher cidade** abre a Lista sem GPS. A cidade define as unidades consultadas. A origem de distâncias e rotas pode ser definida mais tarde com o GPS ou um ponto no mapa. As unidades vêm da API, filtradas pela cidade (Goiânia e Aparecida de Goiânia são as áreas sugeridas). O app reconsulta as unidades a cada 30 s, sem reabrir a tela; a interface não exibe aviso de dados simulados (a API ainda marca esses dados com `is_demo`). Esperas e disponibilidade só aparecem como atuais quando a leitura é recente; caso contrário, o app indica **dados desatualizados** ou **dados operacionais indisponíveis**. As distâncias em mapa, lista, comparação e detalhes são **aproximadas em linha reta** (calculadas no aparelho). O **percurso de carro** é obtido via `GET /api/v1/routes/` (OSRM no backend) na tela de rota. Com o backend em modo de demonstração (`DEMO_MODE=true`), a mesma tela oferece **Ônibus** com uma rota simulada; sem ele, o app informa que o transporte público está indisponível.

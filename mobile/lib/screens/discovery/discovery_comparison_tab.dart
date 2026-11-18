@@ -14,6 +14,7 @@ class DiscoveryComparisonTab extends StatelessWidget {
     required this.now,
     required this.distances,
     required this.carMinutes,
+    required this.busMinutes,
     required this.serviceFilter,
     required this.travelMode,
     required this.hasOrigin,
@@ -35,6 +36,7 @@ class DiscoveryComparisonTab extends StatelessWidget {
   final DateTime now;
   final Map<String, double?> distances;
   final Map<String, int> carMinutes;
+  final Map<String, int> busMinutes;
   final String? serviceFilter;
   final TravelMode travelMode;
   final bool hasOrigin;
@@ -54,8 +56,9 @@ class DiscoveryComparisonTab extends StatelessWidget {
     final routable = units.where(
       (unit) => isValidGeographicPosition(unit.position),
     );
-    final needsCarTimes = routable.any(
-      (unit) => !carMinutes.containsKey(unit.id),
+    final travelMinutes = byBus ? busMinutes : carMinutes;
+    final needsTravelTimes = routable.any(
+      (unit) => !travelMinutes.containsKey(unit.id),
     );
     return ListView(
       key: const PageStorageKey('discovery-comparison-scroll'),
@@ -92,10 +95,6 @@ class DiscoveryComparisonTab extends StatelessWidget {
                     'Uma ou mais unidades selecionadas estão fora dos filtros atuais.',
                     style: theme.bodySmall,
                   ),
-                  const SizedBox(height: 8),
-                ],
-                if (units.any((unit) => unit.isDemo)) ...[
-                  const IllustrativeNotice(compact: true, short: true),
                   const SizedBox(height: 8),
                 ],
                 _ComparisonRow(
@@ -145,17 +144,6 @@ class DiscoveryComparisonTab extends StatelessWidget {
                     onSelectionChanged: (value) => onMode(value.single),
                   ),
                 ),
-                if (byBus) ...[
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Tempo de ônibus indisponível para estas unidades.',
-                  ),
-                  if (!hasOrigin)
-                    TextButton(
-                      onPressed: onChooseOrigin,
-                      child: const Text('Definir ponto de partida'),
-                    ),
-                ],
                 const SizedBox(height: 8),
                 _ComparisonRow(
                   label: serviceFilter == null
@@ -192,36 +180,40 @@ class DiscoveryComparisonTab extends StatelessWidget {
                         : 'Sem ponto de partida',
                   ),
                 ),
-                if (!byBus) ...[
-                  _ComparisonRow(
-                    label: 'Tempo de carro',
-                    units: units,
-                    cell: (unit) {
-                      final minutes = carMinutes[unit.id];
-                      return Text(
-                        minutes != null ? '$minutes min' : 'Sem estimativa',
-                      );
-                    },
+                _ComparisonRow(
+                  label: byBus ? 'Tempo de ônibus' : 'Tempo de carro',
+                  units: units,
+                  cell: (unit) {
+                    final minutes = travelMinutes[unit.id];
+                    return Text(
+                      minutes != null ? '$minutes min' : 'Sem estimativa',
+                    );
+                  },
+                ),
+                if (needsTravelTimes || !hasOrigin)
+                  OutlinedButton.icon(
+                    onPressed: calculating ? null : onCalculate,
+                    icon: Icon(
+                      byBus
+                          ? Icons.directions_bus_outlined
+                          : Icons.directions_car_outlined,
+                    ),
+                    label: Text(
+                      calculating
+                          ? 'Calculando tempos…'
+                          : calculationFailed
+                          ? 'Tentar calcular novamente'
+                          : hasOrigin
+                          ? 'Calcular tempos de ${byBus ? 'ônibus' : 'carro'}'
+                          : 'Definir ponto de partida',
+                    ),
                   ),
-                  if (needsCarTimes || !hasOrigin)
-                    OutlinedButton.icon(
-                      onPressed: calculating ? null : onCalculate,
-                      icon: const Icon(Icons.directions_car_outlined),
-                      label: Text(
-                        calculating
-                            ? 'Calculando tempos…'
-                            : calculationFailed
-                            ? 'Tentar calcular novamente'
-                            : hasOrigin
-                            ? 'Calcular tempos de carro'
-                            : 'Definir ponto de partida',
-                      ),
-                    ),
-                  if (calculationFailed)
-                    const Text(
-                      'Alguns tempos de carro não puderam ser calculados.',
-                    ),
-                ],
+                if (calculationFailed)
+                  Text(
+                    byBus
+                        ? 'Tempo de ônibus indisponível para estas unidades.'
+                        : 'Alguns tempos de carro não puderam ser calculados.',
+                  ),
                 const SizedBox(height: 8),
                 _ComparisonRow(
                   units: units,

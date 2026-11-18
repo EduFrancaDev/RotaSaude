@@ -7,11 +7,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:rotasaude/models/driving_route.dart';
 import 'package:rotasaude/models/health_unit.dart';
+import 'package:rotasaude/models/transit_route.dart';
 import 'package:rotasaude/models/user_location_origin.dart';
 import 'package:rotasaude/repositories/health_unit_repository.dart';
 import 'package:rotasaude/repositories/route_repository.dart';
 import 'package:rotasaude/services/external_maps.dart';
 import 'package:rotasaude/services/straight_line_distance.dart';
+import 'package:rotasaude/theme/app_theme.dart';
 import 'package:rotasaude/theme/app_colors.dart';
 import 'package:rotasaude/widgets/unit_ui.dart';
 
@@ -22,6 +24,7 @@ class RoutePreviewScreen extends StatefulWidget {
     required this.routeRepository,
     required this.onChooseOrigin,
     this.onCalculated,
+    this.onBusCalculated,
     this.openMaps = openUnitInMaps,
     this.now,
     super.key,
@@ -32,6 +35,7 @@ class RoutePreviewScreen extends StatefulWidget {
   final RouteRepository routeRepository;
   final Future<UserLocationOrigin?> Function() onChooseOrigin;
   final void Function(LatLng, DrivingRoute)? onCalculated;
+  final void Function(LatLng, TransitRoute)? onBusCalculated;
   final Future<bool> Function(HealthUnit) openMaps;
   final DateTime Function()? now;
 
@@ -47,6 +51,11 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
   bool _loading = false;
   bool _openingMaps = false;
   int _loadGeneration = 0;
+  TravelMode _mode = TravelMode.car;
+  TransitRoute? _busRoute;
+  HealthApiException? _busFailure;
+  bool _busLoading = false;
+  int _busGeneration = 0;
 
   bool get _canCalculate => isValidGeographicPosition(widget.unit.position);
 
@@ -94,10 +103,63 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     }
   }
 
+  /// Rota de ônibus simulada: só é buscada quando o usuário escolhe Ônibus.
+  Future<void> _calculateBus() async {
+    final origin = _origin;
+    if (origin == null || !_canCalculate) return;
+    final generation = ++_busGeneration;
+    setState(() {
+      _busLoading = true;
+      _busFailure = null;
+      _busRoute = null;
+    });
+    try {
+      final route = await widget.routeRepository.fetchBusRoute(
+        origin: origin.coordinate,
+        unitId: widget.unit.id,
+      );
+      if (!mounted || generation != _busGeneration) return;
+      setState(() {
+        _busRoute = route;
+        _busLoading = false;
+      });
+      widget.onBusCalculated?.call(origin.coordinate, route);
+    } on Exception catch (error) {
+      if (!mounted || generation != _busGeneration) return;
+      setState(() {
+        _busFailure = error is HealthApiException
+            ? error
+            : const HealthApiException(
+                HealthApiFailureKind.invalidResponse,
+                'Resposta inválida.',
+              );
+        _busLoading = false;
+      });
+    }
+  }
+
+  void _selectMode(TravelMode mode) {
+    if (mode == _mode) return;
+    setState(() => _mode = mode);
+    if (mode == TravelMode.bus &&
+        _busRoute == null &&
+        _busFailure == null &&
+        !_busLoading) {
+      _calculateBus();
+    }
+  }
+
   Future<void> _changeOrigin() async {
     final origin = await widget.onChooseOrigin();
     if (!mounted || origin == null) return;
-    setState(() => _origin = origin);
+    setState(() {
+      _origin = origin;
+      _busGeneration++;
+      _busRoute = null;
+      _busFailure = null;
+      _busLoading = false;
+    });
+    if (_mode == TravelMode.bus) _calculateBus();
     await _calculate();
   }
 
@@ -157,60 +219,82 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
               ),
             ],
             const SizedBox(height: 12),
-            Text('Rota de carro', style: theme.titleMedium),
-            if (!_canCalculate)
-              const Text(
-                'A unidade não tem um ponto no mapa para calcular a rota aqui.',
-              )
-            else if (origin == null)
-              const Text(
-                'Defina de onde você vai sair para calcular o trajeto.',
-              )
-            else if (_loading)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Semantics(
-                  liveRegion: true,
-                  child: const Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(child: Text('Calculando rota de carro…')),
-                    ],
+            if (_canCalculate)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<TravelMode>(
+                  style: AppTheme.primarySegmentedButtonStyle,
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: TravelMode.car, label: Text('Carro')),
+                    ButtonSegment(value: TravelMode.bus, label: Text('Ônibus')),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (value) => _selectMode(value.single),
+                ),
+              ),
+            const SizedBox(height: 12),
+            if (_mode == TravelMode.bus)
+              ..._busSection(theme, origin)
+            else ...[
+              Text('Rota de carro', style: theme.titleMedium),
+              if (!_canCalculate)
+                const Text(
+                  'A unidade não tem um ponto no mapa para calcular a rota aqui.',
+                )
+              else if (origin == null)
+                const Text(
+                  'Defina de onde você vai sair para calcular o trajeto.',
+                )
+              else if (_loading)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: const Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(child: Text('Calculando rota de carro…')),
+                      ],
+                    ),
+                  ),
+                )
+              else if (_failure case final failure?)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _failureMessage(failure),
+                      style: theme.bodyLarge,
+                    ),
+                  ),
+                )
+              else if (route != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '${route.durationMinutes} min de carro · ${formatDistanceKilometers(route.distanceKm)} de trajeto',
+                  style: theme.titleLarge?.copyWith(
+                    color: AppColors.ink,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              )
-            else if (_failure case final failure?)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Semantics(
-                  liveRegion: true,
-                  child: Text(_failureMessage(failure), style: theme.bodyLarge),
+                Text(
+                  'Rota calculada por ${route.provider}',
+                  style: theme.bodySmall?.copyWith(color: AppColors.muted),
                 ),
-              )
-            else if (route != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                '${route.durationMinutes} min de carro · ${formatDistanceKilometers(route.distanceKm)} de trajeto',
-                style: theme.titleLarge?.copyWith(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w700,
+                const SizedBox(height: 12),
+                _RouteMap(
+                  polyline: route.polyline,
+                  origin: origin,
+                  destination: unit.position,
                 ),
-              ),
-              Text(
-                'Rota calculada por ${route.provider}',
-                style: theme.bodySmall?.copyWith(color: AppColors.muted),
-              ),
-              const SizedBox(height: 12),
-              _RouteMap(
-                route: route,
-                origin: origin,
-                destination: unit.position,
-              ),
+              ],
             ],
             const SizedBox(height: 12),
             if (_canCalculate && origin != null)
@@ -219,10 +303,6 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                 icon: const Icon(Icons.edit_location_alt_outlined),
                 label: const Text('Alterar ponto de partida'),
               ),
-            if (unit.isDemo) ...[
-              const SizedBox(height: 8),
-              const IllustrativeNotice(compact: true),
-            ],
             const SizedBox(height: 8),
             UnitWaitEstimate(unit: unit, now: now, showUpdate: true),
           ],
@@ -234,9 +314,11 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_failure != null)
+            if (_mode == TravelMode.bus
+                ? _busFailure != null
+                : _failure != null)
               FilledButton(
-                onPressed: _calculate,
+                onPressed: _mode == TravelMode.bus ? _calculateBus : _calculate,
                 child: const Text('Tentar novamente'),
               )
             else if (_canCalculate && origin == null)
@@ -245,7 +327,8 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
                 child: const Text('Definir ponto de partida'),
               ),
             if (canOpenExternal)
-              if (route != null || !_canCalculate)
+              if ((_mode == TravelMode.bus ? _busRoute : route) != null ||
+                  !_canCalculate)
                 FilledButton.icon(
                   onPressed: _openingMaps ? null : _openExternal,
                   icon: const Icon(Icons.open_in_new),
@@ -263,6 +346,86 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
     );
   }
 
+  List<Widget> _busSection(TextTheme theme, UserLocationOrigin? origin) {
+    final route = _busRoute;
+    return [
+      Text('Rota de ônibus', style: theme.titleMedium),
+      if (!_canCalculate)
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text(
+            'A unidade não tem um ponto no mapa para calcular a rota aqui.',
+          ),
+        )
+      else if (origin == null)
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text('Defina de onde você vai sair para calcular o trajeto.'),
+        )
+      else if (_busLoading)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Semantics(
+            liveRegion: true,
+            child: const Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Expanded(child: Text('Calculando rota de ônibus…')),
+              ],
+            ),
+          ),
+        )
+      else if (_busFailure case final failure?)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Semantics(
+            liveRegion: true,
+            child: Text(_busFailureMessage(failure), style: theme.bodyLarge),
+          ),
+        )
+      else if (route != null) ...[
+        const SizedBox(height: 8),
+        Text(
+          '${route.durationMinutes} min de ônibus · ${formatDistanceKilometers(route.distanceKm)} de trajeto',
+          style: theme.titleLarge?.copyWith(
+            color: AppColors.ink,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        Text(
+          'Saída às ${formatClockTime(route.departureAt)} · chegada às ${formatClockTime(route.arrivalAt)}',
+          style: theme.bodyMedium,
+        ),
+        const SizedBox(height: 10),
+        _BusSteps(route: route),
+        const SizedBox(height: 12),
+        _RouteMap(
+          polyline: route.polyline,
+          origin: origin,
+          destination: widget.unit.position,
+          stops: [route.boardingStop, route.alightingStop],
+        ),
+      ],
+    ];
+  }
+
+  String _busFailureMessage(HealthApiException error) => switch (error.kind) {
+    HealthApiFailureKind.client when error.statusCode == 404 =>
+      'Não há rota de ônibus para este trajeto.',
+    HealthApiFailureKind.client =>
+      'Transporte público indisponível neste servidor.',
+    HealthApiFailureKind.timeout =>
+      'O cálculo da rota de ônibus demorou demais. Tente novamente.',
+    HealthApiFailureKind.connection ||
+    HealthApiFailureKind.server ||
+    HealthApiFailureKind.invalidResponse => _failureMessage(error.kind),
+  };
+
   String _failureMessage(HealthApiFailureKind kind) => switch (kind) {
     HealthApiFailureKind.connection =>
       'Sem conexão com o servidor. Verifique a conexão e tente novamente.',
@@ -275,16 +438,78 @@ class _RoutePreviewScreenState extends State<RoutePreviewScreen> {
   };
 }
 
+class _BusSteps extends StatelessWidget {
+  const _BusSteps({required this.route});
+
+  final TransitRoute route;
+
+  static int _minutes(double seconds) =>
+      seconds <= 0 ? 0 : (seconds / 60).round().clamp(1, 999999);
+
+  @override
+  Widget build(BuildContext context) {
+    final wait = route.waitMinutes;
+    final steps = [
+      (
+        Icons.directions_walk,
+        'Caminhe ${route.walkToStopMeters.round()} m '
+            '(${_minutes(route.walkToStopSeconds)} min) até ${route.boardingStop.name}',
+      ),
+      (
+        Icons.schedule,
+        '${wait == 0 ? 'Sem espera' : 'Espere $wait min'} · '
+            '${route.lineName} sai às ${formatClockTime(route.busDepartureAt)}',
+      ),
+      (
+        Icons.directions_bus,
+        '${_minutes(route.inVehicleSeconds)} min de ônibus até '
+            '${route.alightingStop.name}, chegada às ${formatClockTime(route.busArrivalAt)}',
+      ),
+      (
+        Icons.directions_walk,
+        'Caminhe ${route.walkFromStopMeters.round()} m '
+            '(${_minutes(route.walkFromStopSeconds)} min) até a unidade, chegada às ${formatClockTime(route.arrivalAt)}',
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (icon, text) in steps)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Semantics(
+              container: true,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ExcludeSemantics(
+                    child: Icon(icon, size: 20, color: AppColors.navy),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(text)),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _RouteMap extends StatelessWidget {
   const _RouteMap({
-    required this.route,
+    required this.polyline,
     required this.origin,
     required this.destination,
+    this.stops = const [],
   });
 
-  final DrivingRoute route;
+  final List<LatLng> polyline;
   final UserLocationOrigin origin;
   final LatLng destination;
+
+  /// Pontos de ônibus simulados, quando a rota é de transporte público.
+  final List<TransitStop> stops;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -300,7 +525,7 @@ class _RouteMap extends StatelessWidget {
                 bounds: LatLngBounds.fromPoints([
                   origin.coordinate,
                   destination,
-                  ...route.polyline,
+                  ...polyline,
                 ]),
                 padding: const EdgeInsets.all(36),
                 maxZoom: 16,
@@ -314,7 +539,7 @@ class _RouteMap extends StatelessWidget {
               PolylineLayer(
                 polylines: [
                   Polyline(
-                    points: route.polyline,
+                    points: polyline,
                     strokeWidth: 5,
                     color: AppColors.blue,
                   ),
@@ -332,6 +557,17 @@ class _RouteMap extends StatelessWidget {
                       semanticLabel: 'Ponto de partida',
                     ),
                   ),
+                  for (final stop in stops)
+                    Marker(
+                      point: stop.position,
+                      width: 36,
+                      height: 36,
+                      child: Icon(
+                        Icons.directions_bus,
+                        color: AppColors.blue,
+                        semanticLabel: stop.name,
+                      ),
+                    ),
                   Marker(
                     point: destination,
                     width: 40,

@@ -74,10 +74,6 @@ class _UnitDetailsScreenState extends State<UnitDetailsScreen> {
                 style: text.bodyLarge?.copyWith(color: AppColors.muted),
               ),
             const SizedBox(height: 14),
-            if (unit.isDemo) ...[
-              const IllustrativeNotice(compact: true),
-              const SizedBox(height: 12),
-            ],
             Card.outlined(
               color: Colors.white,
               margin: EdgeInsets.zero,
